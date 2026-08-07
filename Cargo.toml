@@ -1,0 +1,10 @@
+[package]
+name = "FVNN-Mini-NN-Verifier"
+version = "0.0.1"
+edition = "2024"
+
+[dependencies]
+clap = { version = "4.6.1", features = ["derive"] }
+ndarray = "0.17.2"
+thiserror = "2.0.18"
+zip = "8.6.0"
