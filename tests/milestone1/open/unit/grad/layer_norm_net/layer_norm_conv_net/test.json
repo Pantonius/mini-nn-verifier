@@ -1,0 +1,12 @@
+{
+    "command": "grad",
+    "network": "resources/layer_norm_conv_net_network.mininn",
+    "inputs": [
+        "resources/input_0.bin"
+    ],
+    "expected_outputs": [
+        "expected_grad_0.bin"
+    ],
+    "description": "conv(same-pad, 3x3) \u2192 layer_norm over last axis (gamma=1, beta=0) \u2192 ReLU; batch=4, spatial 8x10",
+    "points": 3
+}

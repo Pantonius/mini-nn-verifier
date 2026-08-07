@@ -1,0 +1,12 @@
+{
+    "command": "eval",
+    "network": "resources/conv_kernel_flip_trap_network.mininn",
+    "inputs": [
+        "resources/input_0.bin"
+    ],
+    "expected_outputs": [
+        "expected_output_0.bin"
+    ],
+    "description": "single-window: correlation gives 140; convolution (kernel-flip bug) gives 100",
+    "points": 2
+}

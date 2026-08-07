@@ -1,0 +1,12 @@
+{
+    "command": "eval",
+    "network": "resources/dense_conv_net_network.mininn",
+    "inputs": [
+        "resources/input_0.bin"
+    ],
+    "expected_outputs": [
+        "expected_output_0.bin"
+    ],
+    "description": "DenseNet-style: each block receives the sum of all prior outputs; 3 blocks with ReLU/ReLU/GELU; all 2-D same-padding 3\u00d73 conv; batch=4, 8\u00d720",
+    "points": 2
+}

@@ -1,0 +1,14 @@
+{
+    "command": "grad",
+    "network": "resources/two_stream_conv_resnet_network.mininn",
+    "inputs": [
+        "resources/input_0.bin",
+        "resources/input_1.bin"
+    ],
+    "expected_outputs": [
+        "expected_grad_0.bin",
+        "expected_grad_1.bin"
+    ],
+    "description": "two-input 2-D conv network: stream1=conv(3x3)+leaky_relu, stream2=conv(3x3)+ELU, merged by addition; final conv(3x3)+GELU with residual from stream1; batch=4, spatial 8x8",
+    "points": 3
+}

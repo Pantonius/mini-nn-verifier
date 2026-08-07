@@ -1,0 +1,12 @@
+{
+    "command": "grad",
+    "network": "resources/recurrent_unrolled_conv_network.mininn",
+    "inputs": [
+        "resources/input_0.bin"
+    ],
+    "expected_outputs": [
+        "expected_grad_0.bin"
+    ],
+    "description": "recurrent-like architecture: same 3\u00d73 conv kernel applied 4 times with leaky_relu; weight sharing means the kernel Const appears in 4 equations; batch=4, 8\u00d720",
+    "points": 2
+}

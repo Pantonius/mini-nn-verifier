@@ -1,0 +1,12 @@
+{
+    "command": "grad",
+    "network": "resources/pad_asymmetric_dilation2_network.mininn",
+    "inputs": [
+        "resources/input_0.bin"
+    ],
+    "expected_outputs": [
+        "expected_grad_0.bin"
+    ],
+    "description": "asymmetric padding (2 left, 1 right) with one zero inserted between elements on the last two (spatial) axes; NCHW input 2x1x3x4 -> 2x1x8x10",
+    "points": 1
+}

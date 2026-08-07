@@ -1,0 +1,12 @@
+{
+  "command": "verify",
+  "network": "resources/circles_elu_viol_1_network.mininn",
+  "inputs": [
+    "box",
+    "resources/input_0_lb.bin",
+    "resources/input_0_ub.bin"
+  ],
+  "expected_verdict": "viol",
+  "description": "Verify whether the network output is >= 0 in a 2d input space. This networks is ELU-activated.",
+  "points": 5
+}

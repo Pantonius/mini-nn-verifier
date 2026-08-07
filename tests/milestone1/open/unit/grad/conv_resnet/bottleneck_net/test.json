@@ -1,0 +1,12 @@
+{
+    "command": "grad",
+    "network": "resources/bottleneck_net_network.mininn",
+    "inputs": [
+        "resources/input_0.bin"
+    ],
+    "expected_outputs": [
+        "expected_grad_0.bin"
+    ],
+    "description": "2-D bottleneck: avg_pool(3,3) compresses (4,12,30)\u2192(4,4,10); GELU conv_same at low resolution; skip from pooled input; batch=4",
+    "points": 3
+}

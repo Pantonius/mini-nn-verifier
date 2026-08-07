@@ -1,0 +1,12 @@
+{
+    "command": "eval",
+    "network": "resources/multiscale_fusion_network.mininn",
+    "inputs": [
+        "resources/input_0.bin"
+    ],
+    "expected_outputs": [
+        "expected_output_0.bin"
+    ],
+    "description": "2-D multi-scale feature fusion: full-res branch (conv+leaky_relu) and half-res branch (avg_pool(2,2)+conv+ELU) merged at half resolution via addition; batch=4, 12\u00d724 \u2192 6\u00d712",
+    "points": 2
+}

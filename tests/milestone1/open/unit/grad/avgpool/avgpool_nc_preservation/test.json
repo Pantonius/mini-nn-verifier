@@ -1,0 +1,12 @@
+{
+    "command": "grad",
+    "network": "resources/avgpool_nc_preservation_network.mininn",
+    "inputs": [
+        "resources/input_0.bin"
+    ],
+    "expected_outputs": [
+        "expected_grad_0.bin"
+    ],
+    "description": "distinct per-plane constants; output of plane (n,c) must stay self-contained",
+    "points": 1
+}

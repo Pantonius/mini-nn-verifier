@@ -1,0 +1,12 @@
+{
+    "command": "eval",
+    "network": "resources/leaky_relu_2d_batch_network.mininn",
+    "inputs": [
+        "resources/input_0.bin"
+    ],
+    "expected_outputs": [
+        "expected_output_0.bin"
+    ],
+    "description": "leaky_relu with slope=0.2 on a batch of 8 vectors of length 16, values in [-3, 3]",
+    "points": 1
+}

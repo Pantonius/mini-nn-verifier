@@ -1,0 +1,13 @@
+{
+    "command": "verify",
+    "network": "resources/circles_viol_2_network.mininn",
+    "inputs": [
+        "box",
+        "resources/input_0_lb.bin",
+        "resources/input_0_ub.bin"
+    ],
+    "expected_verdict": "viol",
+    "description": "circles margin dips below 0 inside a box straddling the boundary",
+    "points": 0,
+    "bonus_points": 0
+}

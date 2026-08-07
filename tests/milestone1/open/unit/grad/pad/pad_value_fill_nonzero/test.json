@@ -1,0 +1,12 @@
+{
+    "command": "grad",
+    "network": "resources/pad_value_fill_nonzero_network.mininn",
+    "inputs": [
+        "resources/input_0.bin"
+    ],
+    "expected_outputs": [
+        "expected_grad_0.bin"
+    ],
+    "description": "value=99 (non-zero) to catch hardcoded zero-init",
+    "points": 1
+}

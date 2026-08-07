@@ -1,0 +1,26 @@
+{
+  "command": "fuzz_bounds",
+  "n_trials": 150,
+  "seed": 6024369,
+  "primitives": [
+    "neg",
+    "relu",
+    "square",
+    "exp",
+    "add",
+    "dot",
+    "expand_dims",
+    "moveaxis",
+    "reshape",
+    "reduce_sum"
+  ],
+  "check_nan_inf": false,
+  "eps_min": 0.001,
+  "eps_max": 0.5,
+  "n_eval_samples": 3,
+  "sample_atol": 1e-06,
+  "sample_rtol": 1e-06,
+  "description": "fuzz bounds with all supported primitives to verify robustness including numerically unsafe ops",
+  "points": 0,
+  "bonus_points": 0
+}

@@ -1,0 +1,17 @@
+{
+    "command": "bounds",
+    "network": "resources/fc_relu_box_network.mininn",
+    "inputs": [
+        "box",
+        "resources/input_0_lb.bin",
+        "resources/input_0_ub.bin",
+        "point",
+        "resources/input_1.bin",
+        "point",
+        "resources/input_2.bin"
+    ],
+    "expected_outputs": [
+        "expected_output_0_lb.bin",
+        "expected_output_0_ub.bin"
+    ]
+}

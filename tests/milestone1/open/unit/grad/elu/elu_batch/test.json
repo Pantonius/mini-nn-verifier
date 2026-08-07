@@ -1,0 +1,12 @@
+{
+    "command": "grad",
+    "network": "resources/elu_batch_network.mininn",
+    "inputs": [
+        "resources/input_0.bin"
+    ],
+    "expected_outputs": [
+        "expected_grad_0.bin"
+    ],
+    "description": "ELU activation on a batch of 4 vectors of length 20, values in [-2, 2]",
+    "points": 1
+}

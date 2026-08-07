@@ -1,0 +1,12 @@
+{
+    "command": "eval",
+    "network": "resources/avgpool_window1_identity_network.mininn",
+    "inputs": [
+        "resources/input_0.bin"
+    ],
+    "expected_outputs": [
+        "expected_output_0.bin"
+    ],
+    "description": "window=1, stride=1: output equals input exactly",
+    "points": 1
+}

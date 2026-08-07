@@ -1,0 +1,12 @@
+{
+    "command": "eval",
+    "network": "resources/elu_composition_add_network.mininn",
+    "inputs": [
+        "resources/input_0.bin"
+    ],
+    "expected_outputs": [
+        "expected_output_0.bin"
+    ],
+    "description": "elu(x + scalar): exercises broadcasted add inside the elu desugaring",
+    "points": 1
+}

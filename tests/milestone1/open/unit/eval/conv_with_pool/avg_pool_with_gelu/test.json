@@ -1,0 +1,12 @@
+{
+    "command": "eval",
+    "network": "resources/avg_pool_with_gelu_network.mininn",
+    "inputs": [
+        "resources/input_0.bin"
+    ],
+    "expected_outputs": [
+        "expected_output_0.bin"
+    ],
+    "description": "2-D avg_pool(window=5,stride=2) followed by GELU activation; batch=4, 12\u00d712 \u2192 4\u00d74",
+    "points": 3
+}

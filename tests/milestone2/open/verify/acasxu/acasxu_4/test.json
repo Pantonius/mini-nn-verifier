@@ -1,0 +1,12 @@
+{
+  "command": "verify",
+  "network": "resources/acasxu_1_1_viol_1_network.mininn",
+  "inputs": [
+    "box",
+    "resources/input_0_lb.bin",
+    "resources/input_0_ub.bin"
+  ],
+  "expected_verdict": "viol",
+  "description": "ACAS Xu acasxu_1_1: targeted margin (action 0 preferred over 2) viol over an L-inf box (eps=0.01); deep 6x50 ReLU net verified by input-splitting BaB over IBP bounds",
+  "points": 20
+}

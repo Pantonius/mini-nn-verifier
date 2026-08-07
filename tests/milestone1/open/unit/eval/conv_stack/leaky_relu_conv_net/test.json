@@ -1,0 +1,12 @@
+{
+    "command": "eval",
+    "network": "resources/leaky_relu_conv_net_network.mininn",
+    "inputs": [
+        "resources/input_0.bin"
+    ],
+    "expected_outputs": [
+        "expected_output_0.bin"
+    ],
+    "description": "single-layer 2-D conv net: conv(same-pad, 3x3, stride=1) \u2192 leaky_relu(slope=0.1); batch=4, spatial 8x10, output preserved",
+    "points": 2
+}

@@ -1,0 +1,12 @@
+{
+    "command": "grad",
+    "network": "resources/conv_kernel3_stride1_network.mininn",
+    "inputs": [
+        "resources/input_0.bin"
+    ],
+    "expected_outputs": [
+        "expected_grad_0.bin"
+    ],
+    "description": "NCHW\u00d7OIHW 2-D conv with 3x3 Gaussian-like kernel, stride=1; input (N=2,C=1,H=8,W=10); output (2,1,6,8)",
+    "points": 2
+}

@@ -1,0 +1,7 @@
+{
+    "command": "eval",
+    "network": "resources/circles_network_5.mininn",
+    "inputs": ["resources/zero_input.bin"],
+    "expected_outputs": ["expected_output_0.bin"],
+    "tolerance": 1e-9
+}

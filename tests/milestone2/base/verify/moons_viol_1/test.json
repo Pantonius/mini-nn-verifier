@@ -1,0 +1,13 @@
+{
+    "command": "verify",
+    "network": "resources/moons_viol_1_network.mininn",
+    "inputs": [
+        "box",
+        "resources/input_0_lb.bin",
+        "resources/input_0_ub.bin"
+    ],
+    "expected_verdict": "viol",
+    "description": "moons ReLU classifier: margin < 0 (counterexample) on an L-inf box (eps=0.06) around a class-0 point",
+    "points": 0,
+    "bonus_points": 0
+}

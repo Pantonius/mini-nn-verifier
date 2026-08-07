@@ -1,0 +1,26 @@
+[project]
+name = "testrunner"
+version = "0.0.1"
+description = "Test runner for mininnverifier-compatible implementations."
+authors = [{ name = "David Boetius", email = "david.boetius@uni-konstanz.de" }]
+requires-python = ">=3.14"
+dependencies = [
+    "numpy >= 2.0, < 3.0",
+    "hypothesis >= 6.0, < 7.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.3",
+    "pytest-cov>=7.1.0",
+]
+
+[build-system]
+requires = ["uv_build>=0.9.18,<0.12.0"]
+build-backend = "uv_build"
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.format]
+skip-magic-trailing-comma = true

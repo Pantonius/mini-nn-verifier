@@ -1,0 +1,15 @@
+{
+    "command": "bounds",
+    "network": "resources/dot_point_box_network.mininn",
+    "inputs": [
+        "point",
+        "resources/input_0.bin",
+        "box",
+        "resources/input_1_lb.bin",
+        "resources/input_1_ub.bin"
+    ],
+    "expected_outputs": [
+        "expected_output_0_lb.bin",
+        "expected_output_0_ub.bin"
+    ]
+}

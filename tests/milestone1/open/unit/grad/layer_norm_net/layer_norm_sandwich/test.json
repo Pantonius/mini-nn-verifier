@@ -1,0 +1,12 @@
+{
+    "command": "grad",
+    "network": "resources/layer_norm_sandwich_network.mininn",
+    "inputs": [
+        "resources/input_0.bin"
+    ],
+    "expected_outputs": [
+        "expected_grad_0.bin"
+    ],
+    "description": "conv\u2192layer_norm\u2192leaky_relu\u2192conv\u2192layer_norm\u2192elu; two-layer 2-D conv with LN between each; batch=4, 8\u00d720",
+    "points": 3
+}

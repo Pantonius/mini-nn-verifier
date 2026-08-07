@@ -1,0 +1,12 @@
+{
+    "command": "grad",
+    "network": "resources/pad_batch_large_network.mininn",
+    "inputs": [
+        "resources/input_0.bin"
+    ],
+    "expected_outputs": [
+        "expected_grad_0.bin"
+    ],
+    "description": "symmetric 3-element zero-padding, no dilation, on the last two (spatial) axes; batch of 4 single-channel 5x6 images -> 4x1x11x12",
+    "points": 1
+}

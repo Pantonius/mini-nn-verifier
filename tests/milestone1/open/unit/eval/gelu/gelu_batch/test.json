@@ -1,0 +1,12 @@
+{
+    "command": "eval",
+    "network": "resources/gelu_batch_network.mininn",
+    "inputs": [
+        "resources/input_0.bin"
+    ],
+    "expected_outputs": [
+        "expected_output_0.bin"
+    ],
+    "description": "GELU activation on a batch of 6 vectors of length 16, values in [-2, 2]",
+    "points": 1
+}

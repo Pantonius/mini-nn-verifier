@@ -1,0 +1,12 @@
+{
+    "command": "grad",
+    "network": "resources/pad_symmetric_no_dilation_network.mininn",
+    "inputs": [
+        "resources/input_0.bin"
+    ],
+    "expected_outputs": [
+        "expected_grad_0.bin"
+    ],
+    "description": "symmetric 1-element zero-padding, no dilation, on the last two (spatial) axes; NCHW input 2x1x4x5 -> 2x1x6x7",
+    "points": 1
+}

@@ -1,0 +1,12 @@
+{
+    "command": "eval",
+    "network": "resources/pad_empty_axes_network.mininn",
+    "inputs": [
+        "resources/input_0.bin"
+    ],
+    "expected_outputs": [
+        "expected_output_0.bin"
+    ],
+    "description": "empty axes tuple: output must equal the input",
+    "points": 1
+}

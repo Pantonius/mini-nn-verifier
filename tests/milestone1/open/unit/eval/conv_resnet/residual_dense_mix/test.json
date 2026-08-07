@@ -1,0 +1,12 @@
+{
+    "command": "eval",
+    "network": "resources/residual_dense_mix_network.mininn",
+    "inputs": [
+        "resources/input_0.bin"
+    ],
+    "expected_outputs": [
+        "expected_output_0.bin"
+    ],
+    "description": "mixed 2-D residual+dense architecture: block1 residual, block2 dense (uses x+h1), block3 residual+dense (uses h1+h2); activations leaky_relu/ELU/GELU; batch=4, 8\u00d720",
+    "points": 3
+}

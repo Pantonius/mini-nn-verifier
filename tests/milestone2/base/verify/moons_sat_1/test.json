@@ -1,0 +1,13 @@
+{
+    "command": "verify",
+    "network": "resources/moons_sat_1_network.mininn",
+    "inputs": [
+        "box",
+        "resources/input_0_lb.bin",
+        "resources/input_0_ub.bin"
+    ],
+    "expected_verdict": "sat",
+    "description": "moons ReLU classifier: margin >= 0 verified on an L-inf box (eps=0.06) around a class-1 point",
+    "points": 0,
+    "bonus_points": 0
+}

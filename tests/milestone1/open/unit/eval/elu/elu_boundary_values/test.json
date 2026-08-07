@@ -1,0 +1,12 @@
+{
+    "command": "eval",
+    "network": "resources/elu_boundary_values_network.mininn",
+    "inputs": [
+        "resources/input_0.bin"
+    ],
+    "expected_outputs": [
+        "expected_output_0.bin"
+    ],
+    "description": "boundary values including -0.0, +0.0, subnormal; exercises the >=0 boundary",
+    "points": 1
+}

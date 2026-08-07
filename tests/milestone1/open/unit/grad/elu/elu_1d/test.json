@@ -1,0 +1,12 @@
+{
+    "command": "grad",
+    "network": "resources/elu_1d_network.mininn",
+    "inputs": [
+        "resources/input_0.bin"
+    ],
+    "expected_outputs": [
+        "expected_grad_0.bin"
+    ],
+    "description": "ELU activation on 100 linearly spaced values in [-4, 4]",
+    "points": 1
+}

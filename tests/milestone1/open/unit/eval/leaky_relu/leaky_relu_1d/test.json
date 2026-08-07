@@ -1,0 +1,12 @@
+{
+    "command": "eval",
+    "network": "resources/leaky_relu_1d_network.mininn",
+    "inputs": [
+        "resources/input_0.bin"
+    ],
+    "expected_outputs": [
+        "expected_output_0.bin"
+    ],
+    "description": "leaky_relu with slope=0.1 on 100 values linearly spaced in [-5, 5]",
+    "points": 1
+}

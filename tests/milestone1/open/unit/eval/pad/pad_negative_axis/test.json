@@ -1,0 +1,12 @@
+{
+    "command": "eval",
+    "network": "resources/pad_negative_axis_network.mininn",
+    "inputs": [
+        "resources/input_0.bin"
+    ],
+    "expected_outputs": [
+        "expected_output_0.bin"
+    ],
+    "description": "axes=(-1,) must normalize to rank-1; frames last axis with zero padding",
+    "points": 1
+}

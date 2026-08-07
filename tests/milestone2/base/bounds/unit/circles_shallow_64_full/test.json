@@ -1,0 +1,29 @@
+{
+    "command": "bounds",
+    "network": "resources/circles_shallow_64_full_network.mininn",
+    "inputs": [
+        "box",
+        "resources/input_0_lb.bin",
+        "resources/input_0_ub.bin"
+    ],
+    "check": "bounds_within_range",
+    "output_shapes": [
+        [
+            1
+        ]
+    ],
+    "sample_outputs": [
+        "resources/sample_outputs_0.bin"
+    ],
+    "reference_lb": [
+        "resources/reference_output_0_lb.bin"
+    ],
+    "reference_ub": [
+        "resources/reference_output_0_ub.bin"
+    ],
+    "tightness_factor": 1.1,
+    "sample_atol": 1e-09,
+    "description": "full-network IBP output bounds for circles_shallow_64 (hidden width 64) over the L-inf box [-0.5, 0.5]^2",
+    "points": 0,
+    "bonus_points": 0
+}

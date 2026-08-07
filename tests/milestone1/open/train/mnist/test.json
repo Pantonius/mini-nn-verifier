@@ -1,0 +1,18 @@
+{
+  "command": "train",
+  "dataset": "mnist",
+  "in_size": 784,
+  "num_classes": 10,
+  "timeout": 10800,
+  "source_dataset": "mnist",
+  "points": 110,
+  "bonus_points": 27.5,
+  "scoring": {
+    "function": "exponential",
+    "k": 5,
+    "baseline": 0.92,
+    "bonus_threshold": 0.985,
+    "ceiling": 0.9987
+  },
+  "description": "Scoring: exponential curve (k=5) over best test accuracy. Accuracy at or below the baseline (linear-classifier accuracy) earns 0 points; accuracy at or above the bonus_threshold (reference network accuracy) earns full regular points. Beyond the threshold, bonus points scale on the same exponential curve up to the ceiling (state-of-the-art accuracy)."
+}

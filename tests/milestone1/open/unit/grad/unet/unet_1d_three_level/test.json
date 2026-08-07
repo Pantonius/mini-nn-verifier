@@ -1,0 +1,12 @@
+{
+    "command": "grad",
+    "network": "resources/unet_1d_three_level_network.mininn",
+    "inputs": [
+        "resources/input_0.bin"
+    ],
+    "expected_outputs": [
+        "expected_grad_0.bin"
+    ],
+    "description": "3-level 2D UNet: encoder (conv+relu+avgpool\u00d73) at resolutions 24\u219212\u21926\u21923; bottleneck (conv+gelu); decoder (dot-upsample+skip+conv, activations leaky_relu/elu/gelu); skip connections at each level; batch=4, 24\u00d724",
+    "points": 3
+}

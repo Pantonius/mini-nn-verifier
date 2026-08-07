@@ -1,0 +1,12 @@
+{
+    "command": "grad",
+    "network": "resources/avgpool_window3_stride1_network.mininn",
+    "inputs": [
+        "resources/input_0.bin"
+    ],
+    "expected_outputs": [
+        "expected_grad_0.bin"
+    ],
+    "description": "2-D avg pooling, window=3x3, stride=1, on a 1x1x8x10 NCHW tensor; output 1x1x6x8",
+    "points": 1
+}

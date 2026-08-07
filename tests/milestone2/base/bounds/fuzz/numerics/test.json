@@ -1,0 +1,25 @@
+{
+  "command": "fuzz_bounds",
+  "n_trials": 25,
+  "seed": 2677293,
+  "primitives": [
+    "neg",
+    "relu",
+    "square",
+    "add",
+    "dot",
+    "expand_dims",
+    "moveaxis",
+    "reshape",
+    "reduce_sum"
+  ],
+  "check_nan_inf": true,
+  "eps_min": 0.001,
+  "eps_max": 0.5,
+  "n_eval_samples": 3,
+  "sample_atol": 1e-06,
+  "sample_rtol": 1e-06,
+  "description": "bounds numerics fuzz: safe primitives only, fails on NaN/Inf in outputs",
+  "points": 0,
+  "bonus_points": 0
+}

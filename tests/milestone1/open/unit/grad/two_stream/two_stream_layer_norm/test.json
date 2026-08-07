@@ -1,0 +1,14 @@
+{
+    "command": "grad",
+    "network": "resources/two_stream_layer_norm_network.mininn",
+    "inputs": [
+        "resources/input_0.bin",
+        "resources/input_1.bin"
+    ],
+    "expected_outputs": [
+        "expected_grad_0.bin",
+        "expected_grad_1.bin"
+    ],
+    "description": "two-input 2-D network: each stream applies layer_norm\u2192conv_same(3\u00d73)\u2192activation; streams merged by addition with residual from x1; batch=4, 8\u00d720",
+    "points": 3
+}

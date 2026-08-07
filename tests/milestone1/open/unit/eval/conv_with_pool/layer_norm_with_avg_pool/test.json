@@ -1,0 +1,12 @@
+{
+    "command": "eval",
+    "network": "resources/layer_norm_with_avg_pool_network.mininn",
+    "inputs": [
+        "resources/input_0.bin"
+    ],
+    "expected_outputs": [
+        "expected_output_0.bin"
+    ],
+    "description": "2-D avg_pool(window=5,stride=2) followed by layer normalisation on last axis; input 12\u00d730 \u2192 4\u00d713; batch=4",
+    "points": 3
+}

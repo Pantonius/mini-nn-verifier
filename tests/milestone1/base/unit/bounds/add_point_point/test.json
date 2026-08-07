@@ -1,0 +1,14 @@
+{
+    "command": "bounds",
+    "network": "resources/add_point_point_network.mininn",
+    "inputs": [
+        "point",
+        "resources/input_0.bin",
+        "point",
+        "resources/input_1.bin"
+    ],
+    "expected_outputs": [
+        "expected_output_0_lb.bin",
+        "expected_output_0_ub.bin"
+    ]
+}

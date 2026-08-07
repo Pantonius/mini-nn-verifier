@@ -1,0 +1,12 @@
+{
+    "command": "grad",
+    "network": "resources/squeeze_excite_net_network.mininn",
+    "inputs": [
+        "resources/input_0.bin"
+    ],
+    "expected_outputs": [
+        "expected_grad_0.bin"
+    ],
+    "description": "squeeze-and-excitation: local 2-D conv+leaky_relu branch recalibrated by a per-row avg-pool gate (elu(row_mean)+1); batch=4, 8\u00d720",
+    "points": 3
+}

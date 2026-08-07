@@ -1,0 +1,12 @@
+{
+    "command": "eval",
+    "network": "resources/conv_batch_kernel5_stride2_network.mininn",
+    "inputs": [
+        "resources/input_0.bin"
+    ],
+    "expected_outputs": [
+        "expected_output_0.bin"
+    ],
+    "description": "NCHW\u00d7OIHW 2-D conv with 5x5 multi-channel kernel (C_out=3,C_in=2), stride=2; input (N=4,C=2,H=12,W=12); output (4,3,4,4)",
+    "points": 2
+}

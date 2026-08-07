@@ -1,0 +1,12 @@
+{
+    "command": "grad",
+    "network": "resources/transformer_single_block_network.mininn",
+    "inputs": [
+        "resources/input_0.bin"
+    ],
+    "expected_outputs": [
+        "expected_grad_0.bin"
+    ],
+    "description": "single-head transformer block (pre-norm): LN\u2192attention(Q/K/V dot+softmax)\u2192residual\u2192LN\u2192FFN(gelu)\u2192residual\u2192gelu; seq=6, d_model=8, d_head=4, d_ff=16; softmax via exp+reduce_sum+reciprocal; upsampling matrix via dot",
+    "points": 3
+}

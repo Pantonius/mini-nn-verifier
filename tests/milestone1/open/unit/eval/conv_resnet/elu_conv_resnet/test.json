@@ -1,0 +1,12 @@
+{
+    "command": "eval",
+    "network": "resources/elu_conv_resnet_network.mininn",
+    "inputs": [
+        "resources/input_0.bin"
+    ],
+    "expected_outputs": [
+        "expected_output_0.bin"
+    ],
+    "description": "residual 2-D conv block: conv(same-pad, 3x3, stride=1) \u2192 ELU \u2192 add skip connection; batch=4, spatial 8x8",
+    "points": 3
+}

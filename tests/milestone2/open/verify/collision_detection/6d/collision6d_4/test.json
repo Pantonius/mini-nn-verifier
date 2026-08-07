@@ -1,0 +1,12 @@
+{
+  "command": "verify",
+  "network": "resources/collision6d_viol_3_network.mininn",
+  "inputs": [
+    "box",
+    "resources/input_0_lb.bin",
+    "resources/input_0_ub.bin"
+  ],
+  "expected_verdict": "viol",
+  "description": "Verify whether the network output is >= 0 in a 6d input space.",
+  "points": 25
+}

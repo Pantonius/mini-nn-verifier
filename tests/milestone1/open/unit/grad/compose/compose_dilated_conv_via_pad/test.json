@@ -1,0 +1,12 @@
+{
+    "command": "grad",
+    "network": "resources/compose_dilated_conv_via_pad_network.mininn",
+    "inputs": [
+        "resources/input_0.bin"
+    ],
+    "expected_outputs": [
+        "expected_grad_0.bin"
+    ],
+    "description": "pad(mid=1) on kernel yields [1,0,2,0,3]; sliding over ones gives 6",
+    "points": 2
+}

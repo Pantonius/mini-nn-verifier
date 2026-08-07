@@ -1,0 +1,19 @@
+{
+  "command": "fuzz_grad",
+  "n_trials": 100,
+  "seed": 0,
+  "primitives": [
+    "neg",
+    "relu",
+    "square",
+    "add",
+    "mul",
+    "dot",
+    "where",
+    "expand_dims",
+    "moveaxis",
+    "reshape",
+    "reduce_sum"
+  ],
+  "check_nan_inf": true
+}

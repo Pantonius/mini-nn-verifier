@@ -1,0 +1,12 @@
+{
+    "command": "eval",
+    "network": "resources/global_context_net_network.mininn",
+    "inputs": [
+        "resources/input_0.bin"
+    ],
+    "expected_outputs": [
+        "expected_output_0.bin"
+    ],
+    "description": "2-D global context network: local conv_same(3\u00d73)+GELU features enriched by additive per-row average (reduce_sum/n broadcasts over last axis) then leaky_relu; batch=4, 8\u00d720",
+    "points": 3
+}

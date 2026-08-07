@@ -1,0 +1,18 @@
+{
+  "command": "fuzz_bounds",
+  "n_trials": 50,
+  "seed": 10417485,
+  "primitives": [
+    "dot",
+    "add"
+  ],
+  "check_nan_inf": false,
+  "eps_min": 0.0,
+  "eps_max": 0.5,
+  "n_eval_samples": 3,
+  "sample_atol": 1e-06,
+  "sample_rtol": 1e-06,
+  "description": "targeted fuzz for dot/add/mul to stress rules for linear primitives",
+  "points": 0,
+  "bonus_points": 0
+}

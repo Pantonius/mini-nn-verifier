@@ -1,0 +1,14 @@
+{
+    "command": "grad",
+    "network": "resources/dual_path_elu_merge_network.mininn",
+    "inputs": [
+        "resources/input_0.bin",
+        "resources/input_1.bin"
+    ],
+    "expected_outputs": [
+        "expected_grad_0.bin",
+        "expected_grad_1.bin"
+    ],
+    "description": "two-input 2-D dual-path network: path1=conv(same,5x5,stride=2)+ELU on 16x16, path2=conv(same,3x3)+leaky_relu on 8x8; both \u2192 8x8, merged by element-wise multiply; batch=4",
+    "points": 3
+}

@@ -1,0 +1,12 @@
+{
+    "command": "eval",
+    "network": "resources/dilated_conv_stack_network.mininn",
+    "inputs": [
+        "resources/input_0.bin"
+    ],
+    "expected_outputs": [
+        "expected_output_0.bin"
+    ],
+    "description": "stack of three 2-D dilated convolutions with increasing dilation rates (1, 2, 4): receptive fields 3, 5, 9 on each axis; all same-padding; activations leaky_relu, ELU, GELU; batch=4, 12\u00d724",
+    "points": 2
+}

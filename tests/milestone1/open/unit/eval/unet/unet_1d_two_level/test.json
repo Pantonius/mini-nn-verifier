@@ -1,0 +1,12 @@
+{
+    "command": "eval",
+    "network": "resources/unet_1d_two_level_network.mininn",
+    "inputs": [
+        "resources/input_0.bin"
+    ],
+    "expected_outputs": [
+        "expected_output_0.bin"
+    ],
+    "description": "2-level 2D UNet: encoder (conv+relu+avgpool\u00d72) \u2192 bottleneck (conv+gelu) \u2192 decoder (nearest-neighbor 2-D upsample via dot\u00d7constant matrices + skip + conv\u00d72); skip connections add encoder features at each resolution; batch=4, 16\u00d716",
+    "points": 3
+}

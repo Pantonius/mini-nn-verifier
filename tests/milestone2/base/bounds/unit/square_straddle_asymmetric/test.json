@@ -1,0 +1,29 @@
+{
+    "command": "bounds",
+    "network": "resources/square_straddle_asymmetric_network.mininn",
+    "inputs": [
+        "box",
+        "resources/input_0_lb.bin",
+        "resources/input_0_ub.bin"
+    ],
+    "check": "bounds_within_range",
+    "output_shapes": [
+        [
+            16
+        ]
+    ],
+    "sample_outputs": [
+        "resources/sample_outputs_0.bin"
+    ],
+    "reference_lb": [
+        "resources/reference_output_0_lb.bin"
+    ],
+    "reference_ub": [
+        "resources/reference_output_0_ub.bin"
+    ],
+    "tightness_factor": 1.1,
+    "sample_atol": 1e-09,
+    "description": "IBP bounds for square over asymmetric straddling boxes (stresses max(lb^2, ub^2) selection and the lb=0/ub=0 boundaries)",
+    "points": 0,
+    "bonus_points": 0
+}

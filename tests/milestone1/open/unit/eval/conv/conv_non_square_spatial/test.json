@@ -1,0 +1,12 @@
+{
+    "command": "eval",
+    "network": "resources/conv_non_square_spatial_network.mininn",
+    "inputs": [
+        "resources/input_0.bin"
+    ],
+    "expected_outputs": [
+        "expected_output_0.bin"
+    ],
+    "description": "rectangular spatial (H=6, W=4) with stride 2; output shape (1,1,2,1)",
+    "points": 2
+}
