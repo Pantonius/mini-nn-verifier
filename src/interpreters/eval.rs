@@ -276,17 +276,21 @@ fn dot(a: &Tensor, b: &Tensor) -> Result<Tensor, EvalError> {
 
 /// Sum over the given axes (numpy default: axes are removed).
 fn reduce_sum(a: &Tensor, axes: &[isize]) -> Tensor {
-    // let nd = a.ndim();
-    // let mut norm: Vec<usize> = axes.iter().map(|&ax| norm_axis_index(ax, nd)).collect();
-    // norm.sort_unstable();
-    // norm.dedup();
-    // let mut out = a.clone();
-    // // Remove from highest axis down so earlier indices stay valid.
-    // for ax in norm.into_iter().rev() {
-    //     out = out.sum_axis(Axis(ax));
-    // }
-    // out
-    todo!()
+    // normalizes axes and then sort and iterate from behind such that we don't need to shift higher
+    // axes when reducing lower axes
+    let mut norm_axes: Vec<usize> = axes
+        .iter()
+        .map(|&ax| norm_axis_index(ax, a.ndim()))
+        .collect();
+    norm_axes.sort_unstable();
+    norm_axes.dedup();
+
+    let mut out = a.clone();
+    for ax in norm_axes.into_iter().rev() {
+        out = out.sum_axis(Axis(ax));
+    }
+
+    out
 }
 
 /// numpy.expand_dims: insert size-1 axes at the given positions (which refer to
@@ -657,5 +661,29 @@ mod tests {
         let a = ArrayD::from_elem(IxDyn(&[2, 3]), 1.0);
         let b = ArrayD::from_elem(IxDyn(&[4, 5]), 1.0); // second-to-last is 4, not 3
         assert!(dot(&a, &b).is_err());
+    }
+
+    #[test]
+    fn reduce_sum_1d() {
+        let a = array![1.0, 2.0, 3.0].into_dyn();
+        let result = reduce_sum(&a, &[0]);
+        assert_eq!(result.shape(), &[]);
+        assert_eq!(result[[]], 6.0);
+    }
+
+    #[test]
+    fn reduce_sum_3d_middle_axis() {
+        let a = ArrayD::from_elem(IxDyn(&[2, 3, 4]), 1.0);
+        let result = reduce_sum(&a, &[1]);
+        assert_eq!(result.shape(), &[2, 4]);
+        assert!(result.iter().all(|&x| x == 3.0));
+    }
+
+    #[test]
+    fn reduce_sum_3d_multi_axes() {
+        let a = ArrayD::from_elem(IxDyn(&[2, 3, 4]), 1.0);
+        let result = reduce_sum(&a, &[0, 2]);
+        assert_eq!(result.shape(), &[3]);
+        assert!(result.iter().all(|&x| x == 8.0)); // 2 * 4 * 1
     }
 }
