@@ -3,8 +3,17 @@ name = "FVNN-Mini-NN-Verifier"
 version = "0.0.1"
 edition = "2024"
 
+[lib]
+name = "mininn_verifier"
+path = "src/lib.rs"
+
+[[bin]]
+name = "mininn"
+path = "src/cli/mod.rs"
+
 [dependencies]
 clap = { version = "4.6.1", features = ["derive"] }
+libm = "0.2"
 ndarray = "0.17.2"
 thiserror = "2.0.18"
 zip = "8.6.0"

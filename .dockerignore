@@ -1,0 +1,10 @@
+# Keep the build context small and reproducible: only Cargo.{toml,lock} and
+# src/ are needed to build the binary.
+target/
+tests/
+.git/
+.direnv/
+.envrc
+default.nix
+README.md
+*.md

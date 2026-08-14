@@ -1,8 +1,13 @@
 use std::collections::HashMap;
-use std::fs;
+use std::fmt::Display;
+use std::fs::{self, File};
 use std::io::Read;
+use std::ops::{Add, Mul};
 use std::path::Path;
 use zip::ZipArchive;
+
+mod env;
+pub use env::*;
 
 #[derive(Debug, thiserror::Error)]
 pub enum MinninError {
@@ -44,11 +49,27 @@ pub fn decode_f64(bytes: &[u8], shape: &[usize]) -> Result<Vec<f64>, MinninError
         .collect())
 }
 
+/// Encode f64 values as a flat little-endian byte buffer (inverse of [`decode_f64`]).
+pub fn encode_f64(values: &[f64]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(values.len() * 8);
+    for v in values {
+        out.extend_from_slice(&v.to_le_bytes());
+    }
+    out
+}
+
 /// Read a standalone input .bin file given the input variable's shape.
 pub fn load_input_bin(path: &Path, shape: &[usize]) -> Result<Vec<f64>, MinninError> {
     let bytes = fs::read(path)?;
     decode_f64(&bytes, shape)
 }
+
+/// Write f64 values to a .bin file as flat little-endian float64.
+pub fn write_output_bin(path: &Path, values: &[f64]) -> Result<(), MinninError> {
+    fs::write(path, encode_f64(values))?;
+    Ok(())
+}
+
 #[derive(Debug, Clone)]
 pub enum AtomKind {
     Var,
@@ -62,11 +83,164 @@ pub struct Atom {
     pub kind: AtomKind,
 }
 
+impl Display for Atom {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let kind = match &self.kind {
+            AtomKind::Var => "var".to_string(),
+            AtomKind::Const(data) => format!("const[{} elems]", data.len()),
+        };
+        write!(f, "{}{:?} ({kind})", self.name, self.shape)
+    }
+}
+
+pub trait Value: Add<Output = Self> + Mul<Output = Self> + Sized {}
+
+#[derive(Debug, Clone)]
+pub struct PaddingOptionConfig {
+    pub left: usize,
+    pub right: usize,
+    pub interior: usize,
+}
+
+#[derive(Debug, Clone)]
+pub struct PaddingOptions {
+    /// The same padding config is applied to each listed axis.
+    pub config: PaddingOptionConfig,
+    pub axes: Vec<isize>,
+    /// Scalar fill value (a literal in the `.mininn` options, e.g. `0.0`).
+    pub value: f64,
+}
+
+#[derive(Debug, Clone)]
+pub struct ConvOptions {
+    pub stride: isize,
+}
+
+#[derive(Debug, Clone)]
+pub struct PoolOptions {
+    pub window_size: Vec<usize>,
+    pub stride: Vec<usize>,
+}
+
+#[derive(Debug, Clone)]
+pub enum Primitive {
+    // elementwise unary
+    Neg(Atom),
+    Reciprocal(Atom),
+    Square(Atom),
+    Sqrt(Atom),
+    Exp(Atom),
+    Log(Atom),
+    // elementwise binary
+    Add(Atom, Atom),
+    Mul(Atom, Atom),
+    // selection: where(cond, x, y)
+    Where(Atom, Atom, Atom),
+    // activations
+    Relu(Atom),
+    LeakyRelu {
+        operand: Atom,
+        slope: f64,
+    },
+    /// Standard-normal CDF (the nonlinearity behind GELU).
+    NormalCdf(Atom),
+    // linear algebra
+    Dot(Atom, Atom),
+    // reduction
+    ReduceSum {
+        operand: Atom,
+        axes: Vec<isize>,
+    },
+    // shape manipulation
+    ExpandDims {
+        operand: Atom,
+        axes: Vec<isize>,
+    },
+    MoveAxis {
+        operand: Atom,
+        source: isize,
+        destination: isize,
+    },
+    Reshape {
+        operand: Atom,
+        new_shape: Vec<isize>,
+    },
+    // padding
+    Pad {
+        operand: Atom,
+        options: PaddingOptions,
+    },
+    // 2d convolution: conv(input, kernel)
+    Conv {
+        input: Atom,
+        kernel: Atom,
+        options: ConvOptions,
+    },
+    // average pooling
+    AvgPool {
+        operand: Atom,
+        options: PoolOptions,
+    },
+    // sum pooling (same options as average pooling)
+    SumPool {
+        operand: Atom,
+        options: PoolOptions,
+    },
+}
+
+impl Primitive {
+    /// The `.mininn` primitive name (as it appears in `graph.txt`).
+    pub fn name(&self) -> &'static str {
+        use Primitive::*;
+        match self {
+            Neg(_) => "neg",
+            Reciprocal(_) => "reciprocal",
+            Square(_) => "square",
+            Sqrt(_) => "sqrt",
+            Exp(_) => "exp",
+            Log(_) => "log",
+            Add(..) => "add",
+            Mul(..) => "mul",
+            Where(..) => "where",
+            Relu(_) => "relu",
+            LeakyRelu { .. } => "leaky_relu",
+            NormalCdf(_) => "normalcdf",
+            Dot(..) => "dot",
+            ReduceSum { .. } => "reduce_sum",
+            ExpandDims { .. } => "expand_dims",
+            MoveAxis { .. } => "moveaxis",
+            Reshape { .. } => "reshape",
+            Pad { .. } => "pad",
+            Conv { .. } => "conv",
+            AvgPool { .. } => "avgpool",
+            SumPool { .. } => "sumpool",
+        }
+    }
+
+    /// The operands, in graph order.
+    pub fn operands(&self) -> Vec<&Atom> {
+        use Primitive::*;
+        match self {
+            Neg(x) | Reciprocal(x) | Square(x) | Sqrt(x) | Exp(x) | Log(x) | Relu(x)
+            | NormalCdf(x) => vec![x],
+            LeakyRelu { operand, .. }
+            | ReduceSum { operand, .. }
+            | ExpandDims { operand, .. }
+            | MoveAxis { operand, .. }
+            | Reshape { operand, .. }
+            | Pad { operand, .. }
+            | AvgPool { operand, .. }
+            | SumPool { operand, .. } => vec![operand],
+            Add(a, b) | Mul(a, b) | Dot(a, b) => vec![a, b],
+            Conv { input, kernel, .. } => vec![input, kernel],
+            Where(c, x, y) => vec![c, x, y],
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Equation {
-    pub primitive: String,
-    pub options: HashMap<String, String>, // raw literal text; parse further as needed
-    pub inputs: Vec<Atom>,
+    pub primitive: Primitive,
     pub outvar: Atom,
 }
 
@@ -88,6 +262,215 @@ fn parse_shape(s: &str) -> Result<Vec<usize>, MinninError> {
                 .map_err(|e| MinninError::Parse(e.to_string()))
         })
         .collect()
+}
+
+/// Parse an option value that is either a bare int (`0`) or a tuple
+/// (`(-1,)`, `(-2, -1)`) into a list of signed ints.
+fn parse_isize_list(s: &str) -> Result<Vec<isize>, MinninError> {
+    let inner = s.trim().trim_start_matches('(').trim_end_matches(')');
+    inner
+        .split(',')
+        .map(str::trim)
+        .filter(|t| !t.is_empty())
+        .map(|t| {
+            t.parse::<isize>()
+                .map_err(|e| MinninError::Parse(e.to_string()))
+        })
+        .collect()
+}
+
+/// Like [`parse_isize_list`] but for unsigned ints (e.g. window sizes).
+fn parse_usize_list(s: &str) -> Result<Vec<usize>, MinninError> {
+    let inner = s.trim().trim_start_matches('(').trim_end_matches(')');
+    inner
+        .split(',')
+        .map(str::trim)
+        .filter(|t| !t.is_empty())
+        .map(|t| {
+            t.parse::<usize>()
+                .map_err(|e| MinninError::Parse(e.to_string()))
+        })
+        .collect()
+}
+
+fn parse_scalar<T: std::str::FromStr>(s: &str, prim: &str, key: &str) -> Result<T, MinninError> {
+    s.trim()
+        .parse::<T>()
+        .map_err(|_| MinninError::Parse(format!("{prim}: bad value for '{key}': {s:?}")))
+}
+
+/// Map a primitive name + its (already-parsed) options + operand [`Atom`]s onto
+/// a typed [`Primitive`], validating operand arity and required options.
+fn build_primitive(
+    name: &str,
+    options: &HashMap<String, String>,
+    inputs: Vec<Atom>,
+) -> Result<Primitive, MinninError> {
+    use Primitive::*;
+
+    let n = inputs.len();
+    let want = |k: usize| -> Result<(), MinninError> {
+        if n == k {
+            Ok(())
+        } else {
+            Err(MinninError::Parse(format!(
+                "{name}: expected {k} operand(s), got {n}"
+            )))
+        }
+    };
+    let opt = |k: &str| -> Result<&str, MinninError> {
+        options
+            .get(k)
+            .map(String::as_str)
+            .ok_or_else(|| MinninError::Parse(format!("{name}: missing option '{k}'")))
+    };
+
+    // Consume operands in graph order (arity is checked first in each arm).
+    let mut it = inputs.into_iter();
+    let mut op = || it.next().unwrap();
+
+    Ok(match name {
+        // elementwise unary
+        "neg" => {
+            want(1)?;
+            Neg(op())
+        }
+        "reciprocal" => {
+            want(1)?;
+            Reciprocal(op())
+        }
+        "square" => {
+            want(1)?;
+            Square(op())
+        }
+        "sqrt" => {
+            want(1)?;
+            Sqrt(op())
+        }
+        "exp" => {
+            want(1)?;
+            Exp(op())
+        }
+        "log" => {
+            want(1)?;
+            Log(op())
+        }
+        // elementwise binary
+        "add" => {
+            want(2)?;
+            Add(op(), op())
+        }
+        "mul" => {
+            want(2)?;
+            Mul(op(), op())
+        }
+        // selection
+        "where" => {
+            want(3)?;
+            Where(op(), op(), op())
+        }
+        // activations
+        "relu" => {
+            want(1)?;
+            Relu(op())
+        }
+        "normalcdf" => {
+            want(1)?;
+            NormalCdf(op())
+        }
+        "leaky_relu" => {
+            want(1)?;
+            LeakyRelu {
+                operand: op(),
+                slope: parse_scalar(opt("slope")?, name, "slope")?,
+            }
+        }
+        // linear algebra
+        "dot" => {
+            want(2)?;
+            Dot(op(), op())
+        }
+        // reduction
+        "reduce_sum" => {
+            want(1)?;
+            ReduceSum {
+                operand: op(),
+                axes: parse_isize_list(opt("axes")?)?,
+            }
+        }
+        // shape manipulation
+        "expand_dims" => {
+            want(1)?;
+            ExpandDims {
+                operand: op(),
+                axes: parse_isize_list(opt("axes")?)?,
+            }
+        }
+        "moveaxis" => {
+            want(1)?;
+            MoveAxis {
+                operand: op(),
+                source: parse_scalar(opt("source")?, name, "source")?,
+                destination: parse_scalar(opt("destination")?, name, "destination")?,
+            }
+        }
+        "reshape" => {
+            want(1)?;
+            Reshape {
+                operand: op(),
+                new_shape: parse_isize_list(opt("new_shape")?)?,
+            }
+        }
+        // padding
+        "pad" => {
+            want(1)?;
+            let cfg = parse_usize_list(opt("config")?)?;
+            if cfg.len() != 3 {
+                return Err(MinninError::Parse(format!(
+                    "pad: config needs 3 values (left, right, interior), got {}",
+                    cfg.len()
+                )));
+            }
+            Pad {
+                operand: op(),
+                options: PaddingOptions {
+                    config: PaddingOptionConfig {
+                        left: cfg[0],
+                        right: cfg[1],
+                        interior: cfg[2],
+                    },
+                    axes: parse_isize_list(opt("axes")?)?,
+                    value: parse_scalar(opt("value")?, name, "value")?,
+                },
+            }
+        }
+        // 2d convolution
+        "conv" => {
+            want(2)?;
+            Conv {
+                input: op(),
+                kernel: op(),
+                options: ConvOptions {
+                    stride: parse_scalar(opt("stride")?, name, "stride")?,
+                },
+            }
+        }
+        // average / sum pooling (identical option shape)
+        "avgpool" | "sumpool" => {
+            want(1)?;
+            let options = PoolOptions {
+                window_size: parse_usize_list(opt("window_size")?)?,
+                stride: parse_usize_list(opt("stride")?)?,
+            };
+            let operand = op();
+            if name == "avgpool" {
+                AvgPool { operand, options }
+            } else {
+                SumPool { operand, options }
+            }
+        }
+        other => return Err(MinninError::Parse(format!("unknown primitive '{other}'"))),
+    })
 }
 
 /// Parse "name[shape]" into (name, shape).
@@ -177,16 +560,13 @@ fn parse_equation(
         .map(|t| parse_atom(t, atoms, consts))
         .collect::<Result<Vec<_>, _>>()?;
 
-    Ok(Equation {
-        primitive,
-        options,
-        inputs,
-        outvar,
-    })
+    let primitive = build_primitive(&primitive, &options, inputs)?;
+
+    Ok(Equation { primitive, outvar })
 }
 
 pub fn load_mininn(path: &Path) -> Result<ComputeGraph, MinninError> {
-    let file = std::fs::File::open(path)?;
+    let file = File::open(path)?;
     let mut zip = ZipArchive::new(file)?;
 
     // 1. Read graph.txt
