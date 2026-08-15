@@ -2,7 +2,7 @@ mod eval;
 pub use eval::*;
 
 mod grad;
-pub use grad::*;
+// pub use grad::*;
 
 use crate::mininn::{Env, Primitive, Value};
 

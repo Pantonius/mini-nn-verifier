@@ -96,16 +96,29 @@ impl Display for Atom {
 pub trait Value: Add<Output = Self> + Mul<Output = Self> + Sized {}
 
 #[derive(Debug, Clone)]
+/// The padding configuration, that is:
+/// - *left* padding
+/// - *right* padding and
+/// - *interior* padding between each pair of neighboring elements
+/// along each padded axis
 pub struct PaddingOptionConfig {
+    /// Padding at the beginning of an axis
     pub left: usize,
+    /// Padding at the end of an axis
     pub right: usize,
+    /// Padding between each pair of neighboring elements
     pub interior: usize,
 }
 
 #[derive(Debug, Clone)]
+/// Padding options, that is:
+/// - *config* of left, right and interior padding
+/// - *axes* that are to be padded according to the padding configuration
+/// - *value* that is used to fill the padding with
 pub struct PaddingOptions {
-    /// The same padding config is applied to each listed axis.
+    /// Padding configuration (left, right and interior padding)
     pub config: PaddingOptionConfig,
+    /// Axes to be padded
     pub axes: Vec<isize>,
     /// Scalar fill value (a literal in the `.mininn` options, e.g. `0.0`).
     pub value: f64,
