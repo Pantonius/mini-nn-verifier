@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use clap::Args;
 use mininn_verifier::{
-    interpreters::{EvalError, EvalInterpreter},
+    interpreters::{EvalError, EvalInterpreter, Interpreter},
     mininn::{load_input_bin, load_mininn, write_output_bin},
 };
 
@@ -30,7 +30,7 @@ pub fn run_eval(args: EvalArgs) -> Result<(), EvalError> {
         )));
     }
 
-    let inputs: Vec<Vec<f64>> = graph
+    let inputs = graph
         .invars
         .iter()
         .zip(&args.input_files)
@@ -39,13 +39,12 @@ pub fn run_eval(args: EvalArgs) -> Result<(), EvalError> {
 
     std::fs::create_dir_all(&args.output_dir)?;
 
-    let outputs = EvalInterpreter::new().run(&graph, inputs)?;
+    let outputs = EvalInterpreter::new().run(&graph, &inputs)?;
 
-    // Write each output as output_<i>.bin and print its path for the testrunner
-    // (matched against expected_outputs by position).
-    for (i, values) in outputs.iter().enumerate() {
+    for (i, tensor) in outputs.iter().enumerate() {
         let path = args.output_dir.join(format!("output_{i}.bin"));
-        write_output_bin(&path, values)?;
+        let values: Vec<f64> = tensor.iter().copied().collect();
+        write_output_bin(&path, &values)?;
         println!("{}", path.display());
     }
 
