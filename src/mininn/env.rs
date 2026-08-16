@@ -41,8 +41,8 @@ impl<T: Value> Env<T> {
         self.inner.insert(key, value);
     }
 
-    pub fn update(&mut self, key: String, new_value: ArrayD<T>) -> bool {
-        match self.inner.get_mut(&key) {
+    pub fn update(&mut self, key: &String, new_value: ArrayD<T>) -> bool {
+        match self.inner.get_mut(key) {
             Some(v) => {
                 *v = new_value;
                 true

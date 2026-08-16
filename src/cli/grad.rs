@@ -2,12 +2,12 @@ use std::path::PathBuf;
 
 use clap::Args;
 use mininn_verifier::{
-    interpreters::{EvalError, EvalInterpreter, Interpreter},
+    interpreters::{EvalError, GradInterpreter, Interpreter},
     mininn::{load_input_bin, load_mininn, write_output_bin},
 };
 
 #[derive(Args)]
-pub struct EvalArgs {
+pub struct GradArgs {
     /// Directory to write output `.bin` files into.
     #[arg(long)]
     output_dir: PathBuf,
@@ -19,7 +19,7 @@ pub struct EvalArgs {
     input_files: Vec<PathBuf>,
 }
 
-pub fn run_eval(args: EvalArgs) -> Result<(), EvalError> {
+pub fn run_grad(args: GradArgs) -> Result<(), EvalError> {
     let graph = load_mininn(args.mininn_file.as_path())?;
 
     if args.input_files.len() != graph.invars.len() {
@@ -39,7 +39,7 @@ pub fn run_eval(args: EvalArgs) -> Result<(), EvalError> {
 
     std::fs::create_dir_all(&args.output_dir)?;
 
-    let outputs = EvalInterpreter::run(&graph, &inputs)?;
+    let outputs = GradInterpreter::run(&graph, &inputs)?;
 
     for (i, tensor) in outputs.iter().enumerate() {
         let path = args.output_dir.join(format!("output_{i}.bin"));
