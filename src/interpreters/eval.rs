@@ -2,12 +2,11 @@ use ndarray::{ArrayD, Axis, Ix0, Ix1, Ix2, IxDyn, Zip, arr0, indices, linalg::Do
 
 use crate::{
     interpreters::{EvalError, Interpreter},
-    mininn::{Atom, AtomKind, ComputeGraph, Env, PaddingOptions, PoolOptions, Primitive, Value},
+    mininn::{Atom, ComputeGraph, Env, PaddingOptions, PoolOptions, Primitive},
 };
 
 /// A concrete tensor value in the `eval` interpreter.
 pub type Tensor = ArrayD<f64>;
-impl Value for Tensor {}
 
 /// Handles negative python style axis index and converts it into an absolute axis index
 fn norm_axis_index(axis: isize, ndim: usize) -> usize {
@@ -452,27 +451,15 @@ impl EvalInterpreter {
         EvalInterpreter
     }
 
-    fn resolve(atom: &Atom, env: &Env<Tensor>) -> Result<Tensor, EvalError> {
-        match &atom.kind {
-            AtomKind::Const(data) => ArrayD::from_shape_vec(IxDyn(&atom.shape), data.clone())
-                .map_err(|e| EvalError::Eval(format!("const {}: {e}", atom.name))),
-            AtomKind::Var => env
-                .get(&atom.name)
-                .cloned()
-                .ok_or_else(|| EvalError::Eval(format!("undefined variable '{}'", atom.name))),
-        }
-    }
-
     pub fn process_primitive(
         &self,
         primitive: &Primitive,
-        _outvar: &Atom,
-        env: &Env<Tensor>,
-    ) -> Result<Vec<Tensor>, EvalError> {
-        let r = |a: &Atom| Self::resolve(a, env);
+        env: &Env<f64>,
+    ) -> Result<Tensor, EvalError> {
+        let r = |a: &Atom| env.resolve(a);
 
         use Primitive::*;
-        Ok(vec![match primitive {
+        Ok(match primitive {
             // elementwise unary
             Neg(a) => r(a)?.mapv(|x| -x),
             Reciprocal(a) => r(a)?.recip(),
@@ -513,11 +500,11 @@ impl EvalInterpreter {
             // pooling
             AvgPool { operand, options } => pool(&r(operand)?, options, true)?,
             SumPool { operand, options } => pool(&r(operand)?, options, false)?,
-        }])
+        })
     }
 }
 
-impl Interpreter<Tensor> for EvalInterpreter {
+impl Interpreter<f64> for EvalInterpreter {
     /// Evaluate `graph` on `inputs` (one flat buffer per input var, in graph
     /// order) and return the output tensors flattened in row-major order.
     fn run(
@@ -532,10 +519,8 @@ impl Interpreter<Tensor> for EvalInterpreter {
         }
 
         for eqn in &graph.equations {
-            let mut out = self.process_primitive(&eqn.primitive, &eqn.outvar, &env)?;
-            assert_eq!(out.len(), 1); // forward pass yields singular value to be bound to outvar
-
-            env.insert(eqn.outvar.name.clone(), out.remove(0));
+            let out = self.process_primitive(&eqn.primitive, &env)?;
+            env.insert(eqn.outvar.name.clone(), out);
         }
 
         graph

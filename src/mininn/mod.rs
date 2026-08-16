@@ -76,7 +76,7 @@ pub fn write_output_bin(path: &Path, values: &[f64]) -> Result<(), MinninError> 
 #[derive(Debug, Clone)]
 pub enum AtomKind {
     Var,
-    Const(Vec<f64>),
+    Const(ArrayD<f64>),
 }
 
 #[derive(Debug, Clone)]
@@ -96,7 +96,8 @@ impl Display for Atom {
     }
 }
 
-pub trait Value: Add<Output = Self> + Mul<Output = Self> + Sized {}
+pub trait Value: Add<Output = Self> + Mul<Output = Self> + Sized + From<f64> + Clone {}
+impl Value for f64 {}
 
 #[derive(Debug, Clone)]
 /// The padding configuration, that is:
@@ -526,7 +527,10 @@ fn parse_atom<'a>(
         let bytes = consts
             .get(&name)
             .ok_or_else(|| MinninError::Parse(format!("missing const data for {name}")))?;
-        AtomKind::Const(decode_f64(bytes, &shape)?)
+        AtomKind::Const(
+            ArrayD::from_shape_vec(IxDyn(&shape), decode_f64(bytes, &shape)?)
+                .map_err(|e| MinninError::Parse(format!("const shape mismatch: {e}")))?,
+        )
     } else {
         AtomKind::Var
     };
