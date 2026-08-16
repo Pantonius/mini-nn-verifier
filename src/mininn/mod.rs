@@ -1,3 +1,4 @@
+use ndarray::{ArrayD, IxDyn};
 use std::collections::HashMap;
 use std::fmt::Display;
 use std::fs::{self, File};
@@ -59,9 +60,11 @@ pub fn encode_f64(values: &[f64]) -> Vec<u8> {
 }
 
 /// Read a standalone input .bin file given the input variable's shape.
-pub fn load_input_bin(path: &Path, shape: &[usize]) -> Result<Vec<f64>, MinninError> {
+pub fn load_input_bin(path: &Path, shape: &[usize]) -> Result<ArrayD<f64>, MinninError> {
     let bytes = fs::read(path)?;
-    decode_f64(&bytes, shape)
+    let data = decode_f64(&bytes, shape)?;
+    ArrayD::from_shape_vec(IxDyn(shape), data)
+        .map_err(|e| MinninError::Parse(format!("input shape mismatch: {e}")))
 }
 
 /// Write f64 values to a .bin file as flat little-endian float64.

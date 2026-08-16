@@ -1,25 +1,12 @@
 use ndarray::{ArrayD, Axis, Ix0, Ix1, Ix2, IxDyn, Zip, arr0, indices, linalg::Dot};
 
 use crate::{
-    interpreters::Interpreter,
-    mininn::{
-        Atom, AtomKind, ComputeGraph, Env, MinninError, PaddingOptions, PoolOptions, Primitive,
-        Value,
-    },
+    interpreters::{EvalError, Interpreter},
+    mininn::{Atom, AtomKind, ComputeGraph, Env, PaddingOptions, PoolOptions, Primitive, Value},
 };
 
-#[derive(Debug, thiserror::Error)]
-pub enum EvalError {
-    #[error(transparent)]
-    Mininn(#[from] MinninError),
-    #[error("io error: {0}")]
-    Io(#[from] std::io::Error),
-    #[error("eval error: {0}")]
-    Eval(String),
-}
-
 /// A concrete tensor value in the `eval` interpreter.
-type Tensor = ArrayD<f64>;
+pub type Tensor = ArrayD<f64>;
 impl Value for Tensor {}
 
 /// Handles negative python style axis index and converts it into an absolute axis index
@@ -476,24 +463,79 @@ impl EvalInterpreter {
         }
     }
 
+    pub fn process_primitive(
+        &self,
+        primitive: &Primitive,
+        _outvar: &Atom,
+        env: &Env<Tensor>,
+    ) -> Result<Vec<Tensor>, EvalError> {
+        let r = |a: &Atom| Self::resolve(a, env);
+
+        use Primitive::*;
+        Ok(vec![match primitive {
+            // elementwise unary
+            Neg(a) => r(a)?.mapv(|x| -x),
+            Reciprocal(a) => r(a)?.recip(),
+            Square(a) => r(a)?.mapv(|x| x * x),
+            Sqrt(a) => r(a)?.sqrt(),
+            Exp(a) => r(a)?.exp(),
+            Log(a) => r(a)?.mapv(f64::ln),
+            // elementwise binary (numpy broadcasting)
+            Add(a, b) => binary(&r(a)?, &r(b)?, |x, y| x + y)?,
+            Mul(a, b) => binary(&r(a)?, &r(b)?, |x, y| x * y)?,
+            Where(c, x, y) => where_(&r(c)?, &r(x)?, &r(y)?)?,
+            // activations
+            Relu(a) => r(a)?.mapv(|x| x.max(0.0)),
+            LeakyRelu { operand, slope } => {
+                r(operand)?.mapv(|x| if x >= 0.0 { x } else { slope * x })
+            }
+            NormalCdf(a) => r(a)?.mapv(|x| 0.5 * (1.0 + libm::erf(x / std::f64::consts::SQRT_2))),
+            // linear algebra
+            Dot(a, b) => dot(&r(a)?, &r(b)?)?,
+            // reduction
+            ReduceSum { operand, axes } => reduce_sum(&r(operand)?, axes),
+            // shape manipulation
+            ExpandDims { operand, axes } => expand_dims(&r(operand)?, axes),
+            MoveAxis {
+                operand,
+                source,
+                destination,
+            } => moveaxis(&r(operand)?, *source, *destination),
+            Reshape { operand, new_shape } => reshape(&r(operand)?, &new_shape)?,
+            // padding
+            Pad { operand, options } => pad(&r(operand)?, options),
+            // 2d convolution
+            Conv {
+                input,
+                kernel,
+                options,
+            } => conv(&r(&input)?, &r(&kernel)?, options.stride)?,
+            // pooling
+            AvgPool { operand, options } => pool(&r(operand)?, options, true)?,
+            SumPool { operand, options } => pool(&r(operand)?, options, false)?,
+        }])
+    }
+}
+
+impl Interpreter<Tensor> for EvalInterpreter {
     /// Evaluate `graph` on `inputs` (one flat buffer per input var, in graph
     /// order) and return the output tensors flattened in row-major order.
-    pub fn run(
-        mut self,
+    fn run(
+        &mut self,
         graph: &ComputeGraph,
-        inputs: Vec<Vec<f64>>,
-    ) -> Result<Vec<Vec<f64>>, EvalError> {
+        inputs: &Vec<Tensor>,
+    ) -> Result<Vec<Tensor>, EvalError> {
         let mut env = Env::new();
 
-        for (var, data) in graph.invars.iter().zip(inputs) {
-            let tensor = ArrayD::from_shape_vec(IxDyn(&var.shape), data)
-                .map_err(|e| EvalError::Eval(format!("input {}: {e}", var.name)))?;
-            env.insert(var.name.clone(), tensor);
+        for (var, tensor) in graph.invars.iter().zip(inputs) {
+            env.insert(var.name.clone(), tensor.clone());
         }
 
         for eqn in &graph.equations {
-            let out = self.process_primitive(eqn.primitive.clone(), &env)?;
-            env.insert(eqn.outvar.name.clone(), out);
+            let mut out = self.process_primitive(&eqn.primitive, &eqn.outvar, &env)?;
+            assert_eq!(out.len(), 1); // forward pass yields singular value to be bound to outvar
+
+            env.insert(eqn.outvar.name.clone(), out.remove(0));
         }
 
         graph
@@ -503,63 +545,9 @@ impl EvalInterpreter {
                 let tensor = env.get(&var.name).ok_or_else(|| {
                     EvalError::Eval(format!("output '{}' was never computed", var.name))
                 })?;
-                Ok(tensor.iter().copied().collect())
+                Ok(tensor.clone())
             })
             .collect()
-    }
-}
-
-impl Interpreter<Tensor> for EvalInterpreter {
-    fn process_primitive(
-        &mut self,
-        primitive: Primitive,
-        env: &Env<Tensor>,
-    ) -> Result<Tensor, EvalError> {
-        let r = |a: &Atom| Self::resolve(a, env);
-
-        use Primitive::*;
-        Ok(match primitive {
-            // elementwise unary
-            Neg(a) => r(&a)?.mapv(|x| -x),
-            Reciprocal(a) => r(&a)?.recip(),
-            Square(a) => r(&a)?.mapv(|x| x * x),
-            Sqrt(a) => r(&a)?.sqrt(),
-            Exp(a) => r(&a)?.exp(),
-            Log(a) => r(&a)?.mapv(f64::ln),
-            // elementwise binary (numpy broadcasting)
-            Add(a, b) => binary(&r(&a)?, &r(&b)?, |x, y| x + y)?,
-            Mul(a, b) => binary(&r(&a)?, &r(&b)?, |x, y| x * y)?,
-            Where(c, x, y) => where_(&r(&c)?, &r(&x)?, &r(&y)?)?,
-            // activations
-            Relu(a) => r(&a)?.mapv(|x| x.max(0.0)),
-            LeakyRelu { operand, slope } => {
-                r(&operand)?.mapv(|x| if x >= 0.0 { x } else { slope * x })
-            }
-            NormalCdf(a) => r(&a)?.mapv(|x| 0.5 * (1.0 + libm::erf(x / std::f64::consts::SQRT_2))),
-            // linear algebra
-            Dot(a, b) => dot(&r(&a)?, &r(&b)?)?,
-            // reduction
-            ReduceSum { operand, axes } => reduce_sum(&r(&operand)?, &axes),
-            // shape manipulation
-            ExpandDims { operand, axes } => expand_dims(&r(&operand)?, &axes),
-            MoveAxis {
-                operand,
-                source,
-                destination,
-            } => moveaxis(&r(&operand)?, source, destination),
-            Reshape { operand, new_shape } => reshape(&r(&operand)?, &new_shape)?,
-            // padding
-            Pad { operand, options } => pad(&r(&operand)?, &options),
-            // 2d convolution
-            Conv {
-                input,
-                kernel,
-                options,
-            } => conv(&r(&input)?, &r(&kernel)?, options.stride)?,
-            // pooling
-            AvgPool { operand, options } => pool(&r(&operand)?, &options, true)?,
-            SumPool { operand, options } => pool(&r(&operand)?, &options, false)?,
-        })
     }
 }
 
