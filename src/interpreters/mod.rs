@@ -1,5 +1,6 @@
 mod eval;
 pub use eval::*;
+use ndarray::ArrayD;
 
 mod grad;
 // pub use grad::*;
@@ -7,7 +8,11 @@ mod grad;
 use crate::mininn::{ComputeGraph, MinninError, Value};
 
 pub trait Interpreter<T: Value> {
-    fn run(&mut self, graph: &ComputeGraph, inputs: &Vec<T>) -> Result<Vec<T>, EvalError>;
+    fn run(
+        &mut self,
+        graph: &ComputeGraph,
+        inputs: &Vec<ArrayD<T>>,
+    ) -> Result<Vec<ArrayD<T>>, EvalError>;
 }
 
 #[derive(Debug, thiserror::Error)]

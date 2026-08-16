@@ -1,12 +1,9 @@
-use ndarray::{ArrayD, IxDyn, array};
+use ndarray::array;
 
 use crate::{
     interpreters::{EvalError, EvalInterpreter, Interpreter, Tensor},
     mininn::{Atom, AtomKind, ComputeGraph, Env, Primitive},
 };
-
-/// A tangent value in the `grad` interpreter.
-pub type Tangent = ArrayD<f64>;
 
 pub struct GradInterpreter;
 
@@ -15,24 +12,16 @@ impl GradInterpreter {
         GradInterpreter
     }
 
-    fn resolve(atom: &Atom, env: &Env<Tangent>) -> Result<Tangent, EvalError> {
-        match &atom.kind {
-            AtomKind::Const(data) => ArrayD::from_shape_vec(IxDyn(&atom.shape), data.clone())
-                .map_err(|e| EvalError::Eval(format!("const {}: {e}", atom.name))),
-            AtomKind::Var => env
-                .get(&atom.name)
-                .cloned()
-                .ok_or_else(|| EvalError::Eval(format!("undefined variable '{}'", atom.name))),
-        }
-    }
-
     fn process_primitive(
         &self,
         primitive: &Primitive,
         outvar: &Atom,
-        env: &Env<Tangent>,
-    ) -> Result<Vec<Tangent>, EvalError> {
-        let tangent = Self::resolve(outvar, env)?;
+        primals: &Env<f64>,
+        env: &Env<f64>,
+    ) -> Result<Vec<Tensor>, EvalError> {
+        let p = |a: &Atom| primals.resolve(a);
+
+        let tangent = env.resolve(outvar)?;
 
         use Primitive::*;
         Ok(match primitive {
@@ -78,33 +67,31 @@ impl GradInterpreter {
     }
 }
 
-impl Interpreter<Tangent> for GradInterpreter {
+impl Interpreter<f64> for GradInterpreter {
     /// Evaluate `graph` on `inputs` (one flat buffer per input var, in graph
     /// order) and return the output tensors flattened in row-major order.
     fn run(
         &mut self,
         graph: &ComputeGraph,
-        inputs: &Vec<Tangent>,
-    ) -> Result<Vec<Tangent>, EvalError> {
+        inputs: &Vec<Tensor>,
+    ) -> Result<Vec<Tensor>, EvalError> {
         // ---- FORWARD (primals) ----
         let eval_interp = EvalInterpreter::new();
-        let mut primals = Env::<Tensor>::new();
+        let mut primals = Env::<f64>::new();
 
         for (var, tensor) in graph.invars.iter().zip(inputs) {
             primals.insert(var.name.clone(), tensor.clone());
         }
 
         for eqn in &graph.equations {
-            let mut out = eval_interp.process_primitive(&eqn.primitive, &eqn.outvar, &primals)?;
-            assert_eq!(out.len(), 1);
-
-            primals.insert(eqn.outvar.name.clone(), out.remove(0));
+            let out = eval_interp.process_primitive(&eqn.primitive, &primals)?;
+            primals.insert(eqn.outvar.name.clone(), out);
         }
 
         // ---- BACKWARD ----
-        let mut env = Env::<Tangent>::new();
+        let mut env = Env::<f64>::new();
 
-        fn combine(var_name: String, tangent: Tangent, env: &mut Env<Tangent>) {
+        fn combine(var_name: String, tangent: Tensor, env: &mut Env<f64>) {
             if let Some(t) = env.get(&var_name) {
                 env.update(var_name, t + tangent);
             } else {
@@ -122,7 +109,7 @@ impl Interpreter<Tangent> for GradInterpreter {
         }
 
         for eqn in graph.equations.iter().rev() {
-            let out = self.process_primitive(&eqn.primitive, &eqn.outvar, &env)?;
+            let out = self.process_primitive(&eqn.primitive, &eqn.outvar, &primals, &env)?;
 
             for (atom, tangent) in eqn.primitive.operands().into_iter().zip(out) {
                 combine(atom.name.clone(), tangent, &mut env);
