@@ -1,14 +1,15 @@
 # Mini NN Verifier
-A Rust implementation of a neural network verifier based on the original educational implementation [mininnverifier (The Mini Neural Network Verifier)](https://github.com/cherrywoods/mininnverifier) by [cherrywoods](https://github.com/cherrywoods) and compatible with the [mininnverifier testrunner](tests/testrunner). It reads `.mininn` network files,
-evaluates forward passes, computes gradients via reverse-mode autodiff, and
-trains MLP classifiers.
+A Rust implementation of a neural network verifier based on the original educational
+implementation [mininnverifier (The Mini Neural Network Verifier)](https://github.com/cherrywoods/mininnverifier)
+by [cherrywoods](https://github.com/cherrywoods) and compatible with the
+[mininnverifier testrunner](https://github.com/cherrywoods/mininnverifier-testrunner).
 
 ## Status
 
 | Milestone | Scope | Status |
 |-----------|-------|--------|
-| 1 | Eval, grad, MLP training | In progress |
-| 2 | Interval bounds, verify | Not started |
+| 1 | Eval, grad, MLP training | Finished (for now) |
+| 2 | Interval bounds, verify | In Progress |
 | 3 | Affine bounds, verify2 | Not started |
 
 ## Architecture
@@ -21,7 +22,7 @@ src/
 │   └── train.rs      # `mininn train` subcommand
 ├── interpreters/
 │   ├── eval.rs       # Forward-pass interpreter (EvalInterpreter)
-│   ├── grad.rs       # Reverse-mode autodiff (GradInterpreter)
+│   ├── grad.rs       # Backward-mode autodiff (GradInterpreter)
 │   └── eval_util.rs  # Tensor ops and broadcasting helpers
 └── mininn/
     ├── nn.rs         # ComputeGraph, Primitive, Atom types
@@ -84,7 +85,7 @@ tests/testrunner/.venv/bin/python -m testrunner local \
     "$(pwd)/target/release/mininn" tests/milestone1/base/unit
 ```
 
-The testrunner requires Python ≥ 3.14. Install it with:
+The testrunner requires Python >= 3.14. Install it with:
 
 ```bash
 pip install uv
