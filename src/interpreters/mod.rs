@@ -7,7 +7,7 @@ use ndarray::ArrayD;
 mod grad;
 pub use grad::*;
 
-use crate::mininn::{ComputeGraph, MinninError, Value};
+use crate::mininn::{ComputeGraph, MininnError, Value};
 
 pub trait Interpreter<T: Value> {
     fn run(graph: &ComputeGraph, inputs: &Vec<ArrayD<T>>) -> Result<Vec<ArrayD<T>>, EvalError>;
@@ -16,7 +16,7 @@ pub trait Interpreter<T: Value> {
 #[derive(Debug, thiserror::Error)]
 pub enum EvalError {
     #[error(transparent)]
-    Mininn(#[from] MinninError),
+    Mininn(#[from] MininnError),
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
     #[error("eval error: {0}")]

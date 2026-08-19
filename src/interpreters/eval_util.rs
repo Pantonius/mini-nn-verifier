@@ -114,8 +114,8 @@ pub(crate) fn reshape_c(a: &Tensor, shape: &[usize]) -> Tensor {
     ArrayD::from_shape_vec(IxDyn(shape), data).expect("reshape element count mismatch")
 }
 
-pub(crate) fn normcdf(a: &Tensor) -> Tensor {
-    a.mapv(|x| 0.5 * (1.0 + libm::erf(x / std::f64::consts::SQRT_2)))
+pub(crate) fn normcdf(x: f64) -> f64 {
+    0.5 * (1.0 + libm::erf(x / std::f64::consts::SQRT_2))
 }
 
 /// numpy.moveaxis: move `src` axis to `dst`, keeping the relative order of the rest.
