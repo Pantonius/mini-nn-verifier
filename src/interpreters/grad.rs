@@ -3,7 +3,7 @@ use ndarray::{ArrayD, Axis, IxDyn, Slice, indices};
 use crate::{
     interpreters::{
         EvalError, EvalInterpreter, Interpreter,
-        eval_util::{Tensor, dot, expand_dims, moveaxis, norm_axis_index, where_},
+        eval_util::{Tensor, dot, expand_dims, moveaxis, norm_axis_index, normcdf, where_},
     },
     mininn::{Atom, AtomKind, ComputeGraph, Env, PaddingOptions, PoolOptions, Primitive},
 };
@@ -116,14 +116,19 @@ fn vjp_pad(tangent: &Tensor, a: &Tensor, opt: &PaddingOptions) -> Vec<Tensor> {
         let si = a.shape()[axis];
         let left = opt.config.left;
         let step = opt.config.interior + 1;
+        // The original elements sit at left, left+step, ..., left+step*(si-1);
+        // the exclusive end is one past the last of these. (Using left+step*si
+        // overshoots by `interior - right` and can run past the axis when
+        // interior > right.)
+        let end = if si == 0 {
+            left
+        } else {
+            left + step * (si - 1) + 1
+        };
         grad = grad
             .slice_axis(
                 Axis(axis),
-                Slice::new(
-                    left as isize,
-                    Some((left + step * si) as isize),
-                    step as isize,
-                ),
+                Slice::new(left as isize, Some(end as isize), step as isize),
             )
             .to_owned();
     }
@@ -191,6 +196,24 @@ impl GradInterpreter {
                 &tangent,
                 &(tangent.clone() * *slope),
             )?],
+            Elu { operand, slope } => {
+                let val = p(operand)?;
+                vec![where_(
+                    &val,
+                    &tangent.clone(),
+                    &(tangent * *slope * &val.exp()),
+                )?]
+            }
+            Gelu(a) => {
+                let val = p(a)?;
+                vec![
+                    tangent * val.mapv(|x| normcdf(x))
+                        + val.clone()
+                            * (val.mapv(|x| {
+                                (-0.5 * x * x).exp() / (2.0 * std::f64::consts::PI).sqrt()
+                            })),
+                ]
+            }
             NormalCdf(a) => vec![
                 tangent
                     * p(a)?.mapv(|x| (-0.5 * x * x).exp() / (2.0 * std::f64::consts::PI).sqrt()),
@@ -265,10 +288,25 @@ impl GradInterpreter {
     }
 }
 
-impl Interpreter<f64> for GradInterpreter {
-    /// Evaluate `graph` on `inputs` (one flat buffer per input var, in graph
-    /// order) and return the output tensors flattened in row-major order.
-    fn run(graph: &ComputeGraph, inputs: &Vec<Tensor>) -> Result<Vec<Tensor>, EvalError> {
+fn softmax_xent_vjp(logits: &Tensor, labels: &Tensor) -> Result<Tensor, EvalError> {
+    let n = logits.shape()[0] as f64;
+    let max = logits.map_axis(Axis(1), |row| row.fold(f64::NEG_INFINITY, |a, &b| a.max(b)));
+
+    let shifted = logits - &max.insert_axis(Axis(1));
+    let exp = shifted.mapv(f64::exp);
+
+    let sum = exp.sum_axis(Axis(1)).insert_axis(Axis(1));
+    let probs = exp / sum;
+
+    Ok((probs - labels) / n)
+}
+
+impl GradInterpreter {
+    pub fn run_loss(
+        graph: &ComputeGraph,
+        inputs: &Vec<Tensor>,
+        labels: Option<&Tensor>,
+    ) -> Result<Vec<Tensor>, EvalError> {
         // ---- FORWARD (primals) ----
         let mut primals = Env::<f64>::new();
 
@@ -295,13 +333,32 @@ impl Interpreter<f64> for GradInterpreter {
         for var in &graph.outvars {
             match var.kind {
                 AtomKind::Var => {
-                    env.insert(var.name.clone(), ArrayD::ones(IxDyn(&var.shape)));
+                    let cotangent = match labels {
+                        None => ArrayD::ones(IxDyn(&var.shape)),
+                        Some(y) => {
+                            let logits = primals.get(&var.name).ok_or_else(|| {
+                                EvalError::Eval(format!(
+                                    "output '{}' not found in primals",
+                                    var.name
+                                ))
+                            })?;
+                            softmax_xent_vjp(logits, y)?
+                        }
+                    };
+                    env.insert(var.name.clone(), cotangent);
                 }
                 AtomKind::Const(_) => continue,
             }
         }
 
         for eqn in graph.equations.iter().rev() {
+            // Equations whose output received no cotangent are dead code (or lie
+            // on a zero-gradient path); their contribution to every operand is
+            // zero, so there is nothing to propagate.
+            if env.get(&eqn.outvar.name).is_none() {
+                continue;
+            }
+
             let out = Self::process_primitive(&eqn.primitive, &eqn.outvar, &primals, &env)?;
 
             for (atom, tangent) in eqn.primitive.operands().into_iter().zip(out) {
@@ -313,12 +370,22 @@ impl Interpreter<f64> for GradInterpreter {
             .invars
             .iter()
             .map(|var| {
-                let tangent = env.get(&var.name).ok_or_else(|| {
-                    EvalError::Eval(format!("output '{}' was never computed", var.name))
-                })?;
-                Ok(tangent.clone())
+                // An input that never received a cotangent does not affect any
+                // output, so its gradient is zero.
+                Ok(env
+                    .get(&var.name)
+                    .cloned()
+                    .unwrap_or_else(|| ArrayD::zeros(IxDyn(&var.shape))))
             })
             .collect()
+    }
+}
+
+impl Interpreter<f64> for GradInterpreter {
+    /// Evaluate `graph` on `inputs` (one flat buffer per input var, in graph
+    /// order) and return the output tensors flattened in row-major order.
+    fn run(graph: &ComputeGraph, inputs: &Vec<Tensor>) -> Result<Vec<Tensor>, EvalError> {
+        GradInterpreter::run_loss(graph, inputs, None)
     }
 }
 
@@ -583,7 +650,7 @@ mod tests {
             zeros(&[3]),
             t.clone(),
         );
-        assert_close_tol(&g[0], &num_vjp(&x, &t, |a| normcdf(a)), 1e-8);
+        assert_close_tol(&g[0], &num_vjp(&x, &t, |a| a.mapv(|x| normcdf(x))), 1e-8);
     }
 
     // ---- linear algebra ----

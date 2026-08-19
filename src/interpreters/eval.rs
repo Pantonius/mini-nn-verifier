@@ -32,7 +32,11 @@ impl EvalInterpreter {
             LeakyRelu { operand, slope } => {
                 r(operand)?.mapv(|x| if x >= 0.0 { x } else { slope * x })
             }
-            NormalCdf(a) => normcdf(&r(a)?),
+            Elu { operand, slope } => {
+                r(operand)?.mapv(|x| x.max(0.0) + slope * (x.exp() - 1.0).min(0.0))
+            }
+            Gelu(a) => r(a)?.mapv(|x| x * normcdf(x)),
+            NormalCdf(a) => r(a)?.mapv(|x| normcdf(x)),
             // linear algebra
             Dot(a, b) => dot(&r(a)?, &r(b)?)?,
             // reduction
@@ -329,7 +333,7 @@ mod tests {
     fn reduce_sum_1d() {
         let a = array![1.0, 2.0, 3.0].into_dyn();
         let result = reduce_sum(&a, &[0]);
-        assert_eq!(result.shape(), &[]);
+        assert_eq!(result.shape(), &[] as &[usize]);
         assert_eq!(result[[]], 6.0);
     }
 

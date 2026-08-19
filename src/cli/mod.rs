@@ -6,6 +6,9 @@ use eval::{EvalArgs, run_eval};
 mod grad;
 use grad::{GradArgs, run_grad};
 
+mod train;
+use train::{TrainArgs, run_train};
+
 use mininn_verifier::interpreters::EvalError;
 
 /// mininnverifier-compatible CLI. The testrunner invokes the binary as
@@ -23,11 +26,14 @@ enum Command {
     Eval(EvalArgs),
     /// Compute the gradient of the given inputs
     Grad(GradArgs),
+    /// Trains a classifier on the given dataset
+    Train(TrainArgs),
 }
 
 fn main() -> Result<(), EvalError> {
     match Cli::parse().command {
         Command::Eval(args) => run_eval(args),
         Command::Grad(args) => run_grad(args),
+        Command::Train(args) => run_train(args),
     }
 }

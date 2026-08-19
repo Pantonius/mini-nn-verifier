@@ -1,0 +1,186 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  # ---- build Docker image once, share via artifact -------------------------
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          tags: mininn:ci
+          # Export to a tar so downstream jobs can load it without a registry.
+          outputs: type=docker,dest=/tmp/mininn.tar
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: docker-image
+          path: /tmp/mininn.tar
+          retention-days: 1
+
+  # ---- shared setup --------------------------------------------------------
+  # Reused by every test job via "needs: build".
+  # Each job downloads the image artifact and installs the testrunner.
+
+  # ---- milestone 1: eval, grad, bounds, verify, fuzz -----------------------
+  milestone1:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: docker-image
+          path: /tmp
+
+      - run: docker load -i /tmp/mininn.tar
+
+      - name: Install testrunner
+        run: |
+          pip install uv
+          uv pip install --system tests/testrunner/
+
+      - name: base / unit
+        run: python -m testrunner docker mininn:ci tests/milestone1/base/unit
+
+      - name: base / fuzz
+        run: python -m testrunner docker mininn:ci tests/milestone1/base/fuzz
+
+      - name: open / unit (eval + grad)
+        run: python -m testrunner docker mininn:ci tests/milestone1/open/unit
+
+      - name: open / fuzz (eval + grad)
+        run: python -m testrunner docker mininn:ci tests/milestone1/open/fuzz
+
+      # open/speed (bench_eval) and */train are excluded:
+      # bench results are hardware-dependent; train requires MNIST + hours of
+      # wall time. Use the 'train' job below (workflow_dispatch only).
+
+  # ---- milestone 2: interval bounds, verify --------------------------------
+  milestone2:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: docker-image
+          path: /tmp
+
+      - run: docker load -i /tmp/mininn.tar
+
+      - name: Install testrunner
+        run: |
+          pip install uv
+          uv pip install --system tests/testrunner/
+
+      - name: base / bounds / unit
+        run: python -m testrunner docker mininn:ci tests/milestone2/base/bounds/unit
+
+      - name: base / bounds / fuzz
+        run: python -m testrunner docker mininn:ci tests/milestone2/base/bounds/fuzz
+
+      - name: base / verify
+        run: python -m testrunner docker mininn:ci tests/milestone2/base/verify
+
+      - name: open / bounds / unit
+        run: python -m testrunner docker mininn:ci tests/milestone2/open/bounds/unit
+
+      - name: open / bounds / fuzz
+        run: python -m testrunner docker mininn:ci tests/milestone2/open/bounds/fuzz
+
+      - name: open / verify
+        run: python -m testrunner docker mininn:ci tests/milestone2/open/verify
+
+  # ---- milestone 3: affine bounds, verify2 ---------------------------------
+  milestone3:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: docker-image
+          path: /tmp
+
+      - run: docker load -i /tmp/mininn.tar
+
+      - name: Install testrunner
+        run: |
+          pip install uv
+          uv pip install --system tests/testrunner/
+
+      - name: base / bounds / unit
+        run: python -m testrunner docker mininn:ci tests/milestone3/base/bounds/unit
+
+      - name: base / verify
+        run: python -m testrunner docker mininn:ci tests/milestone3/base/verify
+
+      - name: open / bounds / unit
+        run: python -m testrunner docker mininn:ci tests/milestone3/open/bounds/unit
+
+      - name: open / bounds / fuzz
+        run: python -m testrunner docker mininn:ci tests/milestone3/open/bounds/fuzz
+
+      - name: open / verify
+        run: python -m testrunner docker mininn:ci tests/milestone3/open/verify
+
+  # ---- train (manual only — slow, needs MNIST download) --------------------
+  train:
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch'
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: docker-image
+          path: /tmp
+
+      - run: docker load -i /tmp/mininn.tar
+
+      - name: Install testrunner
+        run: |
+          pip install uv
+          uv pip install --system tests/testrunner/
+
+      - name: milestone1 base / train
+        run: python -m testrunner docker mininn:ci tests/milestone1/base/train
+        timeout-minutes: 70
+
+      - name: milestone1 open / train
+        run: python -m testrunner docker mininn:ci tests/milestone1/open/train
+        timeout-minutes: 180

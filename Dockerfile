@@ -27,7 +27,9 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
 # The binary only needs glibc + libgcc_s (bzip2/aes/deflate are statically
 # linked), so a slim Debian with the same glibc as the build stage is enough.
 FROM debian:bookworm-slim AS runtime
+WORKDIR /app
 COPY --from=build /usr/local/bin/mininn /usr/local/bin/mininn
+COPY hyperparams ./hyperparams
 
 # The testrunner appends the subcommand (eval/grad/bounds/...) and its args.
 ENTRYPOINT ["/usr/local/bin/mininn"]
