@@ -12,7 +12,7 @@ use serde::Deserialize;
 
 use mininn_verifier::{
     interpreters::{EvalError, GradInterpreter},
-    mininn::{ComputeGraph, Layer, MininnError, encode_f64, init_mlp, load_input_data_bin},
+    mininn::{ComputeGraph, Layer, MininnError, encode_f64, init_mlp, load_input_as_arr2},
 };
 
 #[derive(Args)]
@@ -204,8 +204,8 @@ pub fn run_train(args: TrainArgs) -> Result<(), EvalError> {
         .expect("layer_sizes must be non-empty");
 
     // Load input data and labels
-    let input_data = load_input_data_bin(&args.train_inputs, d)?;
-    let input_labels = load_input_data_bin(&args.train_labels, c)?;
+    let input_data = load_input_as_arr2(&args.train_inputs, d)?;
+    let input_labels = load_input_as_arr2(&args.train_labels, c)?;
 
     if input_data.shape()[0] != input_labels.shape()[0] {
         return Err(MininnError::SizeMismatch {

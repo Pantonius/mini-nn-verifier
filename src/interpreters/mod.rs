@@ -1,11 +1,18 @@
+use ndarray::ArrayD;
+
 mod eval_util;
 
 mod eval;
 pub use eval::*;
-use ndarray::ArrayD;
 
 mod grad;
 pub use grad::*;
+
+mod ibp_util;
+pub use ibp_util::*;
+
+mod ibp;
+pub use ibp::*;
 
 use crate::mininn::{ComputeGraph, MininnError, Value};
 
