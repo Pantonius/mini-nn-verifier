@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use clap::Args;
 use mininn_verifier::{
     interpreters::{EvalError, EvalInterpreter, Interpreter},
-    mininn::{load_input_bin, load_mininn, write_output_bin},
+    mininn::{load_input_as_arr, load_mininn, write_output_bin},
 };
 
 #[derive(Args)]
@@ -34,7 +34,7 @@ pub fn run_eval(args: EvalArgs) -> Result<(), EvalError> {
         .invars
         .iter()
         .zip(&args.input_files)
-        .map(|(var, path)| load_input_bin(path.as_path(), &var.shape))
+        .map(|(var, path)| load_input_as_arr(path.as_path(), &var.shape))
         .collect::<Result<_, _>>()?;
 
     std::fs::create_dir_all(&args.output_dir)?;

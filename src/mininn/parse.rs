@@ -28,17 +28,13 @@ pub fn encode_f64(values: &[f64]) -> Vec<u8> {
     out
 }
 
-/// Read a standalone input .bin file given the input variable's shape.
-pub fn load_input_bin(path: &Path, shape: &[usize]) -> Result<ArrayD<f64>, MininnError> {
+pub fn load_input_as_f64(path: &Path) -> Result<Vec<f64>, MininnError> {
     let bytes = fs::read(path)?;
-    let data = decode_f64(&bytes);
-
-    ArrayD::from_shape_vec(IxDyn(shape), data)
-        .map_err(|e| MininnError::Parse(format!("input shape mismatch: {e}")))
+    Ok(decode_f64(&bytes))
 }
 
 /// Read a standalone input .bin file given the input.
-pub fn load_input_data_bin(path: &Path, d: usize) -> Result<Array2<f64>, MininnError> {
+pub fn load_input_as_arr2(path: &Path, d: usize) -> Result<Array2<f64>, MininnError> {
     let bytes = fs::read(path)?;
     let data = decode_f64(&bytes);
 
@@ -52,6 +48,15 @@ pub fn load_input_data_bin(path: &Path, d: usize) -> Result<Array2<f64>, MininnE
     let n = data.len() / d;
 
     Array2::from_shape_vec((n, d), data)
+        .map_err(|e| MininnError::Parse(format!("input shape mismatch: {e}")))
+}
+
+/// Read a standalone input .bin file given the input variable's shape.
+pub fn load_input_as_arr(path: &Path, shape: &[usize]) -> Result<ArrayD<f64>, MininnError> {
+    let bytes = fs::read(path)?;
+    let data = decode_f64(&bytes);
+
+    ArrayD::from_shape_vec(IxDyn(shape), data)
         .map_err(|e| MininnError::Parse(format!("input shape mismatch: {e}")))
 }
 
