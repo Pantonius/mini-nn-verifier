@@ -19,11 +19,14 @@ src/
 ├── cli/
 │   ├── eval.rs       # `mininn eval` subcommand
 │   ├── grad.rs       # `mininn grad` subcommand
+│   ├── bounds.rs     # `mininn bounds` subcommand
 │   └── train.rs      # `mininn train` subcommand
 ├── interpreters/
 │   ├── eval.rs       # Forward-pass interpreter (EvalInterpreter)
+│   ├── eval_util.rs  # Tensor ops and broadcasting helpers
 │   ├── grad.rs       # Backward-mode autodiff (GradInterpreter)
-│   └── eval_util.rs  # Tensor ops and broadcasting helpers
+│   ├── ibp.rs        # Interval bound propagation (IBPInterpreter)
+│   └── ibp_util.rs   # IBP tensor type and primitive helpers
 └── mininn/
     ├── nn.rs         # ComputeGraph, Primitive, Atom types
     ├── parse.rs      # .mininn ZIP parser
@@ -34,14 +37,21 @@ src/
 ## CLI
 
 ```
-mininn eval  --output-dir <dir> <network.mininn> <input.bin> [...]
-mininn grad  --output-dir <dir> <network.mininn> <input.bin> [...]
-mininn train --output-dir <dir> <dataset>        <inputs.bin> <labels.bin>
+mininn eval   --output-dir <dir> <network.mininn> <input.bin> [...]
+mininn grad   --output-dir <dir> <network.mininn> <input.bin> [...]
+mininn bounds --output-dir <dir> <network.mininn> (box <lb.bin> <ub.bin> | point <x.bin>) [...]
+mininn train  --output-dir <dir> <dataset>        <inputs.bin> <labels.bin>
 ```
 
 Input and output arrays are flat row-major `float64` binary files (no header).
 Network files are ZIP archives containing `graph.txt` and one `.bin` file per
 named constant.
+
+The `bounds` command computes interval (IBP) output bounds. Each network input
+is specified as either a box (`box lb.bin ub.bin`) or a point (`point x.bin`),
+one spec per network input in graph order. For each output the command writes
+`output_{i}_lb.bin` and `output_{i}_ub.bin` into `--output-dir` and prints
+their paths to stdout.
 
 ## Training
 
