@@ -10,7 +10,7 @@
 # them verbatim.
 
 # ---- build stage -----------------------------------------------------------
-FROM rust:1-bookworm AS build
+FROM rust:1.67 AS build
 WORKDIR /app
 
 COPY Cargo.toml Cargo.lock ./
@@ -26,7 +26,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
 # ---- runtime stage ---------------------------------------------------------
 # The binary only needs glibc + libgcc_s (bzip2/aes/deflate are statically
 # linked), so a slim Debian with the same glibc as the build stage is enough.
-FROM debian:bookworm-slim AS runtime
+FROM debian:bullseye-slim AS runtime
 WORKDIR /app
 COPY --from=build /usr/local/bin/mininn /usr/local/bin/mininn
 COPY hyperparams ./hyperparams
