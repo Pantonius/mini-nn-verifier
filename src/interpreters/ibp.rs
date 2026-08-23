@@ -5,10 +5,10 @@ use crate::{
             add, conv, dot, elu, expand_dims, leaky_relu, log, moveaxis, mul, normcdf, pad, pool,
             reduce_sum, relu, reshape,
         },
-        ibp_gelu, ibp_linear, ibp_monotonic_non_dec, ibp_monotonic_non_dec2, ibp_monotonic_non_inc,
-        ibp_reciprocal, ibp_square,
-        ibp_util::IBPTensor,
-        ibp_where,
+        ibp_util::{
+            IBPTensor, ibp_gelu, ibp_linear, ibp_monotonic_non_dec, ibp_monotonic_non_dec2,
+            ibp_monotonic_non_inc, ibp_reciprocal, ibp_square, ibp_where,
+        },
     },
     mininn::{Atom, ComputeGraph, Env, Primitive},
 };

@@ -12,6 +12,9 @@ use train::{TrainArgs, run_train};
 mod bounds;
 use bounds::{BoundsArgs, run_bounds};
 
+mod verify;
+use verify::{VerifyArgs, run_verify};
+
 use mininn_verifier::interpreters::EvalError;
 
 /// mininnverifier-compatible CLI. The testrunner invokes the binary as
@@ -33,6 +36,8 @@ enum Command {
     Train(TrainArgs),
     /// Propagates interval bounds through the entire network (forward)
     Bounds(BoundsArgs),
+    /// Input-Splitting BaB verification of non-zero output
+    Verify(VerifyArgs),
 }
 
 fn main() -> Result<(), EvalError> {
@@ -41,5 +46,6 @@ fn main() -> Result<(), EvalError> {
         Command::Grad(args) => run_grad(args),
         Command::Train(args) => run_train(args),
         Command::Bounds(args) => run_bounds(args),
+        Command::Verify(args) => run_verify(args),
     }
 }
