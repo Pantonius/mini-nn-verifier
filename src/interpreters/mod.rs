@@ -1,16 +1,20 @@
 mod eval_util;
+pub use eval_util::Tensor;
 
 mod eval;
-pub use eval::*;
+pub use eval::EvalInterpreter;
 
 mod grad;
-pub use grad::*;
+pub use grad::GradInterpreter;
 
 mod ibp_util;
-pub use ibp_util::*;
+pub use ibp_util::IBPTensor;
 
 mod ibp;
-pub use ibp::*;
+pub use ibp::IBPInterpreter;
+
+mod bab;
+pub use bab::{BaBResult, input_splitting_bab, uniform_split};
 
 use crate::mininn::{ComputeGraph, MininnError, Value};
 
