@@ -23,6 +23,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       - uses: docker/setup-buildx-action@v3
 
@@ -52,6 +54,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       - uses: actions/setup-python@v5
         with:
@@ -67,7 +71,7 @@ jobs:
       - name: Install testrunner
         run: |
           pip install uv
-          uv pip install --system tests/testrunner/
+          uv pip install --system tests/testrunner/ tests/testrunner/tests/testrunner/
 
       - name: base / unit
         run: python -m testrunner docker mininn:ci tests/milestone1/base/unit
@@ -91,6 +95,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       - uses: actions/setup-python@v5
         with:
@@ -106,7 +112,7 @@ jobs:
       - name: Install testrunner
         run: |
           pip install uv
-          uv pip install --system tests/testrunner/
+          uv pip install --system tests/testrunner/ tests/testrunner/tests/testrunner/
 
       - name: base / bounds / unit
         run: python -m testrunner docker mininn:ci tests/milestone2/base/bounds/unit
@@ -132,6 +138,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       - uses: actions/setup-python@v5
         with:
@@ -147,7 +155,7 @@ jobs:
       - name: Install testrunner
         run: |
           pip install uv
-          uv pip install --system tests/testrunner/
+          uv pip install --system tests/testrunner/ tests/testrunner/tests/testrunner/
 
       - name: base / bounds / unit
         run: python -m testrunner docker mininn:ci tests/milestone3/base/bounds/unit
@@ -172,6 +180,8 @@ jobs:
     timeout-minutes: 240
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       - uses: actions/setup-python@v5
         with:
@@ -187,7 +197,7 @@ jobs:
       - name: Install testrunner
         run: |
           pip install uv
-          uv pip install --system tests/testrunner/
+          uv pip install --system tests/testrunner/ tests/testrunner/tests/testrunner/
 
       - name: milestone1 base / train
         run: python -m testrunner docker mininn:ci tests/milestone1/base/train
