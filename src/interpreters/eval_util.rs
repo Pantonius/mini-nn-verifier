@@ -2,11 +2,16 @@ use ndarray::{ArrayD, Axis, Ix0, Ix1, Ix2, IxDyn, Zip, arr0, indices, linalg::Do
 
 use crate::{
     interpreters::EvalError,
-    mininn::{PaddingOptions, PoolOptions},
+    mininn::{PaddingOptions, PoolOptions, Value},
 };
 
 /// A concrete tensor value in the `eval` interpreter.
 pub type Tensor = ArrayD<f64>;
+impl Value for Tensor {
+    fn from_tensor(tensor: &ArrayD<f64>) -> Self {
+        tensor.clone()
+    }
+}
 
 /// Handles negative python style axis index and converts it into an absolute axis index
 pub(crate) fn norm_axis_index(axis: isize, ndim: usize) -> usize {
@@ -75,6 +80,14 @@ pub(crate) fn binary(
     // zip and map elementwise via given binary function
     // NOTE panic is impossible since av and bv are of same shape
     Ok(Zip::from(&av).and(&bv).map_collect(|&x, &y| f(x, y)))
+}
+
+pub(crate) fn add(x: &Tensor, y: &Tensor) -> Result<Tensor, EvalError> {
+    binary(x, y, |a, b| a + b)
+}
+
+pub(crate) fn mul(x: &Tensor, y: &Tensor) -> Result<Tensor, EvalError> {
+    binary(x, y, |a, b| a * b)
 }
 
 /// numpy.where(cond, x, y) with broadcasting; `cond` is truthy when non-zero.
@@ -450,4 +463,24 @@ pub(crate) fn pool(a: &Tensor, opt: &PoolOptions, average: bool) -> Result<Tenso
         }
     }
     Ok(out)
+}
+
+pub(crate) fn log(a: &Tensor) -> Tensor {
+    a.mapv(f64::ln)
+}
+
+pub(crate) fn relu(a: &Tensor) -> Tensor {
+    a.mapv(|x| x.max(0.0))
+}
+
+pub(crate) fn leaky_relu(a: &Tensor, slope: f64) -> Tensor {
+    a.mapv(|x| if x >= 0.0 { x } else { slope * x })
+}
+
+pub(crate) fn elu(a: &Tensor, slope: f64) -> Tensor {
+    a.mapv(|x| x.max(0.0) + slope * (x.exp() - 1.0).min(0.0))
+}
+
+pub(crate) fn gelu(a: &Tensor) -> Tensor {
+    a.mapv(|x| x * normcdf(x))
 }

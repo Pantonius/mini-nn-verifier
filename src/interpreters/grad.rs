@@ -163,8 +163,8 @@ impl GradInterpreter {
     fn process_primitive(
         primitive: &Primitive,
         outvar: &Atom,
-        primals: &Env<f64>,
-        env: &Env<f64>,
+        primals: &Env<Tensor>,
+        env: &Env<Tensor>,
     ) -> Result<Vec<Tensor>, EvalError> {
         let p = |a: &Atom| primals.resolve(a);
 
@@ -308,7 +308,7 @@ impl GradInterpreter {
         labels: Option<&Tensor>,
     ) -> Result<Vec<Tensor>, EvalError> {
         // ---- FORWARD (primals) ----
-        let mut primals = Env::<f64>::new();
+        let mut primals = Env::new();
 
         for (var, tensor) in graph.invars.iter().zip(inputs) {
             primals.insert(var.name.clone(), tensor.clone());
@@ -320,9 +320,9 @@ impl GradInterpreter {
         }
 
         // ---- BACKWARD ----
-        let mut env = Env::<f64>::new();
+        let mut env = Env::new();
 
-        fn combine(var: &Atom, tangent: Tensor, env: &mut Env<f64>) {
+        fn combine(var: &Atom, tangent: Tensor, env: &mut Env<Tensor>) {
             if let Some(t) = env.get(&var.name) {
                 env.update(&var.name, t + unbroadcast(tangent, &var.shape));
             } else {
@@ -381,7 +381,7 @@ impl GradInterpreter {
     }
 }
 
-impl Interpreter<f64> for GradInterpreter {
+impl Interpreter<Tensor> for GradInterpreter {
     /// Evaluate `graph` on `inputs` (one flat buffer per input var, in graph
     /// order) and return the output tensors flattened in row-major order.
     fn run(graph: &ComputeGraph, inputs: &Vec<Tensor>) -> Result<Vec<Tensor>, EvalError> {

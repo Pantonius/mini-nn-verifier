@@ -1,7 +1,4 @@
-use std::{
-    fmt::Display,
-    ops::{Add, Mul},
-};
+use std::fmt::Display;
 
 use ndarray::ArrayD;
 
@@ -29,9 +26,6 @@ impl Display for Atom {
         write!(f, "{}{:?} ({kind})", self.name, self.shape)
     }
 }
-
-pub trait Value: Add<Output = Self> + Mul<Output = Self> + Sized + From<f64> + Clone {}
-impl Value for f64 {}
 
 #[derive(Debug, Clone)]
 /// The padding configuration, that is:

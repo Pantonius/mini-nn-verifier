@@ -70,29 +70,39 @@ cargo build --release
 
 ## Running tests
 
-Tests use the Python testrunner. The recommended way is via Docker so the
-working directory and file paths are handled correctly:
+Tests use the Python testrunner. `tests/testrunner` is a git submodule that
+itself contains a nested submodule (`tests/testrunner/tests/testrunner`) with
+the testrunner tool. Initialize both before first use:
 
 ```bash
-# Build the image
-docker build -t mininn:local .
+git submodule update --init --recursive
+```
 
-# Run a milestone's tests
-python -m testrunner docker mininn:local tests/milestone1/base/unit
+The testrunner requires Python >= 3.14. Set up its virtualenv with
+[uv](https://github.com/astral-sh/uv):
 
-# Or run locally from the repo root (hyperparams/ must be in cwd)
+```bash
+cd tests/testrunner
+uv sync
+uv pip install --python .venv/bin/python tests/testrunner/
+cd ../..
+```
+
+Then build the binary and run tests from the repo root:
+
+```bash
+cargo build --release
+
+# Run a milestone's tests locally (use absolute paths)
 tests/testrunner/.venv/bin/python -m testrunner local \
-    "$(pwd)/target/release/mininn" tests/milestone1/base/unit
+    "$(pwd)/target/release/mininn" \
+    "$(pwd)/tests/milestone1/base"
+
+# Or via Docker (handles paths automatically)
+docker build -t mininn:local .
+tests/testrunner/.venv/bin/python -m testrunner docker \
+    mininn:local tests/milestone2/base
 ```
-
-The testrunner requires Python >= 3.14. Install it with:
-
-```bash
-pip install uv
-uv pip install tests/testrunner/
-```
-
-For more details refer to the submodule.
 
 ## CI
 

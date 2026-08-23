@@ -11,7 +11,10 @@ impl EvalInterpreter {
         EvalInterpreter
     }
 
-    pub fn process_primitive(primitive: &Primitive, env: &Env<f64>) -> Result<Tensor, EvalError> {
+    pub fn process_primitive(
+        primitive: &Primitive,
+        env: &Env<Tensor>,
+    ) -> Result<Tensor, EvalError> {
         let r = |a: &Atom| env.resolve(a);
 
         use Primitive::*;
@@ -22,20 +25,16 @@ impl EvalInterpreter {
             Square(a) => r(a)?.mapv(|x| x * x),
             Sqrt(a) => r(a)?.sqrt(),
             Exp(a) => r(a)?.exp(),
-            Log(a) => r(a)?.mapv(f64::ln),
+            Log(a) => log(&r(a)?),
             // elementwise binary (numpy broadcasting)
-            Add(a, b) => binary(&r(a)?, &r(b)?, |x, y| x + y)?,
-            Mul(a, b) => binary(&r(a)?, &r(b)?, |x, y| x * y)?,
+            Add(a, b) => add(&r(a)?, &r(b)?)?,
+            Mul(a, b) => mul(&r(a)?, &r(b)?)?,
             Where(c, x, y) => where_(&r(c)?, &r(x)?, &r(y)?)?,
             // activations
-            Relu(a) => r(a)?.mapv(|x| x.max(0.0)),
-            LeakyRelu { operand, slope } => {
-                r(operand)?.mapv(|x| if x >= 0.0 { x } else { slope * x })
-            }
-            Elu { operand, slope } => {
-                r(operand)?.mapv(|x| x.max(0.0) + slope * (x.exp() - 1.0).min(0.0))
-            }
-            Gelu(a) => r(a)?.mapv(|x| x * normcdf(x)),
+            Relu(a) => relu(&r(a)?),
+            LeakyRelu { operand, slope } => leaky_relu(&r(operand)?, *slope),
+            Elu { operand, slope } => elu(&r(operand)?, *slope),
+            Gelu(a) => gelu(&r(a)?),
             NormalCdf(a) => r(a)?.mapv(|x| normcdf(x)),
             // linear algebra
             Dot(a, b) => dot(&r(a)?, &r(b)?)?,
@@ -64,7 +63,7 @@ impl EvalInterpreter {
     }
 }
 
-impl Interpreter<f64> for EvalInterpreter {
+impl Interpreter<Tensor> for EvalInterpreter {
     /// Evaluate `graph` on `inputs` (one flat buffer per input var, in graph
     /// order) and return the output tensors flattened in row-major order.
     fn run(graph: &ComputeGraph, inputs: &Vec<Tensor>) -> Result<Vec<Tensor>, EvalError> {
