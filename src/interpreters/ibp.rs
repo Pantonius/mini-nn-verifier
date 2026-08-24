@@ -16,7 +16,7 @@ use crate::{
 pub struct IBPInterpreter {}
 
 impl IBPInterpreter {
-    fn process_primitive(
+    pub fn process_primitive(
         primitive: &Primitive,
         env: &Env<IBPTensor>,
     ) -> Result<IBPTensor, EvalError> {

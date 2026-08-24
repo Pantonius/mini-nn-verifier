@@ -21,16 +21,6 @@ impl<T: Value> Env<T> {
         self.inner.get(key)
     }
 
-    pub fn resolve(&self, atom: &Atom) -> Result<T, EvalError> {
-        match &atom.kind {
-            AtomKind::Const(data) => Ok(T::from_tensor(&data)),
-            AtomKind::Var => self
-                .get(&atom.name)
-                .cloned()
-                .ok_or_else(|| EvalError::Eval(format!("undefined variable '{}'", atom.name))),
-        }
-    }
-
     pub fn insert(&mut self, key: String, value: T) {
         self.inner.insert(key, value);
     }
@@ -42,6 +32,15 @@ impl<T: Value> Env<T> {
                 true
             }
             None => false,
+        }
+    }
+    pub fn resolve(&self, atom: &Atom) -> Result<T, EvalError> {
+        match &atom.kind {
+            AtomKind::Const(data) => Ok(T::from_tensor(&data)),
+            AtomKind::Var => self
+                .get(&atom.name)
+                .cloned()
+                .ok_or_else(|| EvalError::Eval(format!("undefined variable '{}'", atom.name))),
         }
     }
 }

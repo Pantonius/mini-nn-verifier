@@ -8,13 +8,19 @@ mod grad;
 pub use grad::GradInterpreter;
 
 mod ibp_util;
-pub use ibp_util::IBPTensor;
+pub use ibp_util::{IBPBatchedTensor, IBPTensor};
 
 mod ibp;
 pub use ibp::IBPInterpreter;
 
+mod ibp_batched;
+pub use ibp_batched::IBPBatchedInterpreter;
+
+// mod ibp_batched_sensitivity;
+// pub use ibp_batched_sensitivity::IBPBatchedSensitivityInterpreter;
+
 mod bab;
-pub use bab::{BaBResult, input_splitting_bab, uniform_split};
+pub use bab::{BaBConfig, BaBResult, input_splitting_bab, uniform_split};
 
 use crate::mininn::{ComputeGraph, MininnError, Value};
 
