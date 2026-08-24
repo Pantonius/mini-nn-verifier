@@ -2,7 +2,9 @@ use std::path::{Path, PathBuf};
 
 use clap::Args;
 use mininn_verifier::{
-    interpreters::{BaBResult, EvalError, IBPTensor, input_splitting_bab, uniform_split},
+    interpreters::{
+        BaBConfig, BaBResult, EvalError, IBPTensor, input_splitting_bab, uniform_split,
+    },
     mininn::{ComputeGraph, load_input_as_arr, load_mininn, write_output_bin},
 };
 
@@ -24,6 +26,7 @@ impl VerifyArgs {
     pub fn parse_inputs(&self, graph: &ComputeGraph) -> Result<Vec<IBPTensor>, EvalError> {
         let tokens = &self.input_spec;
         let mut specs = Vec::new();
+        let mut n_boxes = 0;
         let mut i = 0;
 
         for var in &graph.invars {
@@ -42,6 +45,14 @@ impl VerifyArgs {
                             "'box' marker requires two file paths (lb, ub)".into(),
                         ));
                     }
+
+                    n_boxes += 1;
+                    if n_boxes > 1 {
+                        return Err(EvalError::Eval(
+                            "verify currently supports at most one 'box' input; all other inputs must be 'point'".into(),
+                        ));
+                    }
+
                     let lb = load_input_as_arr(Path::new(&tokens[i + 1]), &var.shape)?;
                     let ub = load_input_as_arr(Path::new(&tokens[i + 2]), &var.shape)?;
                     specs.push(IBPTensor::new(lb, ub));
@@ -83,7 +94,7 @@ pub fn run_verify(args: VerifyArgs) -> Result<(), EvalError> {
 
     std::fs::create_dir_all(&args.output_dir)?;
 
-    match input_splitting_bab(&graph, &inputs, uniform_split)? {
+    match input_splitting_bab(&graph, &inputs, uniform_split, BaBConfig::default())? {
         BaBResult::Safe => println!("sat"),
         BaBResult::Unsafe(cex) => {
             for (i, arr) in cex.iter().enumerate() {
@@ -92,6 +103,9 @@ pub fn run_verify(args: VerifyArgs) -> Result<(), EvalError> {
                 println!("{}", path.display());
             }
             println!("viol");
+        }
+        BaBResult::Undecided => {
+            println!("unknown")
         }
     }
 

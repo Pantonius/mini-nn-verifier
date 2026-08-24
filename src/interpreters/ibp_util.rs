@@ -1,6 +1,6 @@
 use std::ops::{Add, Mul};
 
-use ndarray::{ArrayD, Zip, arr0};
+use ndarray::{ArrayD, ArrayView, Axis, Zip, arr0};
 
 use crate::{
     interpreters::{
@@ -10,7 +10,9 @@ use crate::{
     mininn::Value,
 };
 
-/// interval bounds
+// ================================
+// IBPTensor
+// ================================
 #[derive(Debug, Clone)]
 pub struct IBPTensor {
     pub lb: Tensor,
@@ -26,7 +28,7 @@ impl IBPTensor {
         Self { lb, ub, is_point }
     }
 
-    fn is_point(&self) -> bool {
+    pub(crate) fn is_point(&self) -> bool {
         self.is_point
     }
 
@@ -76,6 +78,89 @@ impl From<f64> for IBPTensor {
 impl Value for IBPTensor {
     fn from_tensor(tensor: &ArrayD<f64>) -> Self {
         IBPTensor::new(tensor.clone(), tensor.clone())
+    }
+}
+
+// ================================
+// IBPTensor Batched
+// ================================
+#[derive(Debug, Clone)]
+pub struct IBPBatchedTensor {
+    pub lb: Tensor, // shape [k, d ...]
+    pub ub: Tensor, // shape [k, d ...]
+}
+
+impl IBPBatchedTensor {
+    pub fn batch_size(&self) -> usize {
+        self.lb.shape()[0]
+    }
+
+    pub fn get(&self, i: usize) -> IBPTensor {
+        let lb = self.lb.index_axis(Axis(0), i).to_owned();
+        let ub = self.ub.index_axis(Axis(0), i).to_owned();
+        IBPTensor::new(lb, ub)
+    }
+
+    pub fn stack_input(input_tensors: &[&Vec<IBPTensor>], idx: usize) -> Self {
+        assert!(!input_tensors.is_empty());
+
+        let lbs: Vec<ArrayView<f64, _>> = input_tensors.iter().map(|v| v[idx].lb.view()).collect();
+        let ubs: Vec<ArrayView<f64, _>> = input_tensors.iter().map(|v| v[idx].ub.view()).collect();
+
+        Self {
+            lb: ndarray::stack(Axis(0), &lbs).expect("lb stack failed"),
+            ub: ndarray::stack(Axis(0), &ubs).expect("ub stack failed"),
+        }
+    }
+}
+
+impl From<&Vec<IBPTensor>> for IBPBatchedTensor {
+    fn from(tensors: &Vec<IBPTensor>) -> Self {
+        assert!(!tensors.is_empty(), "cannot batch zero tensors");
+
+        let lbs: Vec<ArrayView<f64, _>> = tensors.iter().map(|t| t.lb.view()).collect();
+        let ubs: Vec<ArrayView<f64, _>> = tensors.iter().map(|t| t.ub.view()).collect();
+
+        IBPBatchedTensor {
+            lb: ndarray::stack(Axis(0), &lbs).expect("lb stack failed"),
+            ub: ndarray::stack(Axis(0), &ubs).expect("ub stack failed"),
+        }
+    }
+}
+
+impl Add for IBPBatchedTensor {
+    type Output = IBPBatchedTensor;
+
+    fn add(self, rhs: Self) -> Self::Output {
+        IBPBatchedTensor {
+            lb: self.lb + rhs.lb,
+            ub: self.ub + rhs.ub,
+        }
+    }
+}
+
+impl Mul for IBPBatchedTensor {
+    type Output = IBPBatchedTensor;
+
+    fn mul(self, rhs: Self) -> Self::Output {
+        let mut a = self.lb.clone() * rhs.lb.clone();
+        let b = self.lb * rhs.ub.clone();
+        let c = self.ub.clone() * rhs.lb;
+        let d = self.ub * rhs.ub;
+
+        let min = min4(&mut a, &b, &c, &d);
+        let max = max4(&mut a, &b, &c, &d);
+
+        IBPBatchedTensor { lb: min, ub: max }
+    }
+}
+
+impl Value for IBPBatchedTensor {
+    fn from_tensor(tensor: &ArrayD<f64>) -> Self {
+        Self {
+            lb: tensor.clone(),
+            ub: tensor.clone(),
+        }
     }
 }
 
