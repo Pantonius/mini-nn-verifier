@@ -5,7 +5,12 @@ use ndarray::Zip;
 
 use crate::{
     interpreters::{
-        EvalError, IBPBatchedInterpreter, IBPBatchedTensor, IBPTensor, Interpreter, Tensor,
+        EvalError, Interpreter,
+        bounds::interval::{
+            ibp_batched::IBPBatchedInterpreter,
+            ibp_util::{IBPBatchedTensor, IBPTensor},
+        },
+        concrete::eval_util::Tensor,
     },
     mininn::ComputeGraph,
 };
@@ -61,8 +66,8 @@ impl Eq for Branch {}
 
 fn branch_width(branch: &Branch) -> f64 {
     branch.inputs.iter().fold(f64::NEG_INFINITY, |a, t| {
-        let max_width = Zip::from(&t.lb)
-            .and(&t.ub)
+        let max_width = Zip::from(t.lb.inner())
+            .and(t.ub.inner())
             .fold(f64::NEG_INFINITY, |b, &l, &u| b.max(u - l));
         a.max(max_width)
     })
@@ -83,7 +88,7 @@ pub fn uniform_split(inputs: &Vec<IBPTensor>) -> Vec<Vec<IBPTensor>> {
         .expect("no interval input to split");
 
     // take the difference between the two...
-    let range = &split_tensor.ub - &split_tensor.lb;
+    let range = split_tensor.ub.inner() - split_tensor.lb.inner();
 
     // ... find the index with the biggest difference
     let (flat_idx, _) = range
@@ -94,18 +99,20 @@ pub fn uniform_split(inputs: &Vec<IBPTensor>) -> Vec<Vec<IBPTensor>> {
         .unwrap();
 
     // ... then unflatten the index into the actual shape
-    let ix = ndarray::IxDyn(&flat_to_multi(flat_idx, split_tensor.lb.shape()));
+    let ix = ndarray::IxDyn(&flat_to_multi(flat_idx, split_tensor.lb.inner().shape()));
 
     // compute the midpoint for split
-    let mid = (split_tensor.lb[ix.clone()] + split_tensor.ub[ix.clone()]) / 2.0;
+    let mid = (split_tensor.lb.inner()[ix.clone()] + split_tensor.ub.inner()[ix.clone()]) / 2.0;
 
     // ... and construct new ub for left partition, as well as new lb for right partition (the
     // midpoint at the widest index)
-    let mut left_ub = split_tensor.ub.clone();
-    left_ub[ix.clone()] = mid;
+    let mut left_ub_arr = split_tensor.ub.inner().clone();
+    left_ub_arr[ix.clone()] = mid;
+    let left_ub: Tensor = left_ub_arr.into();
 
-    let mut right_lb = split_tensor.lb.clone();
-    right_lb[ix] = mid;
+    let mut right_lb_arr = split_tensor.lb.inner().clone();
+    right_lb_arr[ix] = mid;
+    let right_lb: Tensor = right_lb_arr.into();
 
     // construct the left and right partition
     let left_child = {
@@ -118,6 +125,7 @@ pub fn uniform_split(inputs: &Vec<IBPTensor>) -> Vec<Vec<IBPTensor>> {
         child[split_idx] = IBPTensor::new(right_lb, split_tensor.ub.clone());
         child
     };
+
 
     vec![left_child, right_child]
 }
@@ -178,7 +186,7 @@ pub fn input_splitting_bab<S: Fn(&Vec<IBPTensor>) -> Vec<Vec<IBPTensor>>>(
             let out: Vec<IBPTensor> = batched_outputs.iter().map(|t| t.get(i)).collect();
 
             // ub < 0: definite violation of property
-            if out.iter().any(|t| t.ub.iter().any(|&v| v < 0.0)) {
+            if out.iter().any(|t| t.ub.inner().iter().any(|&v| v < 0.0)) {
                 let cex = branch
                     .inputs
                     .iter()
@@ -189,7 +197,7 @@ pub fn input_splitting_bab<S: Fn(&Vec<IBPTensor>) -> Vec<Vec<IBPTensor>>>(
             }
 
             // lb < 0 <= ub: undecided; keep splitting
-            if out.iter().any(|t| t.lb.iter().any(|&v| v < 0.0)) {
+            if out.iter().any(|t| t.lb.inner().iter().any(|&v| v < 0.0)) {
                 // check if maximal dimension (branch width) is below min_width threshold
                 if branch_width(&branch) < config.min_width {
                     // ... if so, give up and declare the satisfiability as undecided
@@ -202,7 +210,7 @@ pub fn input_splitting_bab<S: Fn(&Vec<IBPTensor>) -> Vec<Vec<IBPTensor>>>(
                 let children = split(&branch.inputs);
                 let child_lb = out
                     .iter()
-                    .flat_map(|t| t.lb.iter().copied())
+                    .flat_map(|t| t.lb.inner().iter().copied())
                     .fold(f64::INFINITY, f64::min);
 
                 // and push to priority heap
