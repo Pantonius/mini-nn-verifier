@@ -2,8 +2,8 @@ use std::path::PathBuf;
 
 use clap::Args;
 use mininn_verifier::{
-    interpreters::{EvalError, EvalInterpreter, Interpreter},
-    mininn::{load_input_as_arr, load_mininn, write_output_bin},
+    interpreters::{EvalError, Interpreter, concrete::eval::EvalInterpreter},
+    mininn::{load_mininn, write_output_bin},
 };
 
 #[derive(Args)]
@@ -34,8 +34,8 @@ pub fn run_eval(args: EvalArgs) -> Result<(), EvalError> {
         .invars
         .iter()
         .zip(&args.input_files)
-        .map(|(var, path)| load_input_as_arr(path.as_path(), &var.shape))
-        .collect::<Result<_, _>>()?;
+        .map(|(var, path)| super::load_input_as_tensor(path.as_path(), &var.shape))
+        .collect::<Result<Vec<_>, _>>()?;
 
     std::fs::create_dir_all(&args.output_dir)?;
 
@@ -43,7 +43,7 @@ pub fn run_eval(args: EvalArgs) -> Result<(), EvalError> {
 
     for (i, tensor) in outputs.iter().enumerate() {
         let path = args.output_dir.join(format!("output_{i}.bin"));
-        let values: Vec<f64> = tensor.iter().copied().collect();
+        let values: Vec<f64> = tensor.inner().iter().copied().collect();
         write_output_bin(&path, &values)?;
         println!("{}", path.display());
     }

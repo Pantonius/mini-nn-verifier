@@ -3,9 +3,13 @@ use std::path::{Path, PathBuf};
 use clap::Args;
 use mininn_verifier::{
     interpreters::{
-        BaBConfig, BaBResult, EvalError, IBPTensor, input_splitting_bab, uniform_split,
+        EvalError,
+        bounds::{
+            bab::{BaBConfig, BaBResult, input_splitting_bab, uniform_split},
+            ibp_util::IBPTensor,
+        },
     },
-    mininn::{ComputeGraph, load_input_as_arr, load_mininn, write_output_bin},
+    mininn::{ComputeGraph, load_mininn, write_output_bin},
 };
 
 #[derive(Args)]
@@ -53,8 +57,8 @@ impl VerifyArgs {
                         ));
                     }
 
-                    let lb = load_input_as_arr(Path::new(&tokens[i + 1]), &var.shape)?;
-                    let ub = load_input_as_arr(Path::new(&tokens[i + 2]), &var.shape)?;
+                    let lb = super::load_input_as_tensor(Path::new(&tokens[i + 1]), &var.shape)?;
+                    let ub = super::load_input_as_tensor(Path::new(&tokens[i + 2]), &var.shape)?;
                     specs.push(IBPTensor::new(lb, ub));
                     i += 3;
                 }
@@ -64,7 +68,7 @@ impl VerifyArgs {
                             "'point' marker requires one file path".into(),
                         ));
                     }
-                    let arr = load_input_as_arr(Path::new(&tokens[i + 1]), &var.shape)?;
+                    let arr = super::load_input_as_tensor(Path::new(&tokens[i + 1]), &var.shape)?;
                     specs.push(IBPTensor::new(arr.clone(), arr));
                     i += 2;
                 }
@@ -99,7 +103,7 @@ pub fn run_verify(args: VerifyArgs) -> Result<(), EvalError> {
         BaBResult::Unsafe(cex) => {
             for (i, arr) in cex.iter().enumerate() {
                 let path = args.output_dir.join(format!("counterexample_{i}.bin"));
-                write_output_bin(&path, &arr.iter().copied().collect::<Vec<_>>())?;
+                write_output_bin(&path, &arr.inner().iter().copied().collect::<Vec<_>>())?;
                 println!("{}", path.display());
             }
             println!("viol");

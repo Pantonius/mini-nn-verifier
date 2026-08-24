@@ -1,26 +1,5 @@
-mod eval_util;
-pub use eval_util::Tensor;
-
-mod eval;
-pub use eval::EvalInterpreter;
-
-mod grad;
-pub use grad::GradInterpreter;
-
-mod ibp_util;
-pub use ibp_util::{IBPBatchedTensor, IBPTensor};
-
-mod ibp;
-pub use ibp::IBPInterpreter;
-
-mod ibp_batched;
-pub use ibp_batched::IBPBatchedInterpreter;
-
-// mod ibp_batched_sensitivity;
-// pub use ibp_batched_sensitivity::IBPBatchedSensitivityInterpreter;
-
-mod bab;
-pub use bab::{BaBConfig, BaBResult, input_splitting_bab, uniform_split};
+pub mod bounds;
+pub mod concrete;
 
 use crate::mininn::{ComputeGraph, MininnError, Value};
 

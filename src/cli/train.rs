@@ -11,7 +11,7 @@ use rand_distr::Uniform;
 use serde::Deserialize;
 
 use mininn_verifier::{
-    interpreters::{EvalError, GradInterpreter},
+    interpreters::{EvalError, concrete::{eval_util::Tensor, grad::GradInterpreter}},
     mininn::{ComputeGraph, Layer, MininnError, encode_f64, init_mlp, load_input_as_arr2},
 };
 
@@ -256,29 +256,34 @@ pub fn run_train(args: TrainArgs) -> Result<(), EvalError> {
             let y = Array2::from_shape_fn((batch_size, c), |(i, j)| input_labels[[batch[i], j]]);
 
             // inputs: [x, W0, b0, W1, b1, ...]
-            let mut inputs = vec![x.clone().into_dyn()];
+            let mut inputs: Vec<Tensor> = vec![x.clone().into_dyn().into()];
             for layer in &layers {
-                inputs.push(layer.w.clone().into_dyn());
-                inputs.push(layer.b.clone().into_dyn());
+                inputs.push(layer.w.clone().into_dyn().into());
+                inputs.push(layer.b.clone().into_dyn().into());
             }
 
-            let grads = GradInterpreter::run_loss(&cg, &inputs, Some(&y.clone().into_dyn()))?;
+            let labels: Tensor = y.clone().into_dyn().into();
+            let grads = GradInterpreter::run_loss(&cg, &inputs, Some(&labels))?;
 
             // grads[0] = dx (unused), grads[1 + 2i] = dWi, grads[2 + 2i] = dbi
             let grads_w: Vec<Array2<f64>> = (0..layers.len())
                 .map(|i| {
                     grads[1 + 2 * i]
-                        .clone()
+                        .inner()
+                        .view()
                         .into_dimensionality::<ndarray::Ix2>()
                         .unwrap()
+                        .to_owned()
                 })
                 .collect();
             let grads_b: Vec<Array1<f64>> = (0..layers.len())
                 .map(|i| {
                     grads[2 + 2 * i]
-                        .clone()
+                        .inner()
+                        .view()
                         .into_dimensionality::<ndarray::Ix1>()
                         .unwrap()
+                        .to_owned()
                 })
                 .collect();
 

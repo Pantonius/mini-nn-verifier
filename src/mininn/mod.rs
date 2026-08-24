@@ -1,10 +1,8 @@
 mod env;
-use std::ops::{Add, Mul};
 
 pub use env::*;
 
 mod nn;
-use ndarray::ArrayD;
 pub use nn::*;
 
 mod mlp;
@@ -12,10 +10,6 @@ pub use mlp::*;
 
 mod parse;
 pub use parse::*;
-
-pub trait Value: Add<Output = Self> + Mul<Output = Self> + Sized + Clone {
-    fn from_tensor(tensor: &ArrayD<f64>) -> Self;
-}
 
 #[derive(Debug, thiserror::Error)]
 pub enum MininnError {

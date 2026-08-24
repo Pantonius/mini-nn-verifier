@@ -15,7 +15,17 @@ use bounds::{BoundsArgs, run_bounds};
 mod verify;
 use verify::{VerifyArgs, run_verify};
 
-use mininn_verifier::interpreters::EvalError;
+// mod affine_bounds;
+// use affine_bounds::{AffineBoundsArgs, run_affine_bounds};
+
+use mininn_verifier::{
+    interpreters::{EvalError, concrete::eval_util::Tensor},
+    mininn::load_input_as_arr,
+};
+
+fn load_input_as_tensor(path: &std::path::Path, shape: &[usize]) -> Result<Tensor, EvalError> {
+    Ok(load_input_as_arr(path, shape)?.into())
+}
 
 /// mininnverifier-compatible CLI. The testrunner invokes the binary as
 /// `<prog> <command> ...`, so each command is a subcommand.
@@ -38,6 +48,9 @@ enum Command {
     Bounds(BoundsArgs),
     /// Input-Splitting BaB verification of non-zero output
     Verify(VerifyArgs),
+    // /// Propagates affine bounds through the entire network (backward)
+    // #[command(name = "affine_bounds")]
+    // AffineBounds(AffineBoundsArgs),
 }
 
 fn main() -> Result<(), EvalError> {
@@ -47,5 +60,6 @@ fn main() -> Result<(), EvalError> {
         Command::Train(args) => run_train(args),
         Command::Bounds(args) => run_bounds(args),
         Command::Verify(args) => run_verify(args),
+        // Command::AffineBounds(args) => run_affine_bounds(args),
     }
 }
