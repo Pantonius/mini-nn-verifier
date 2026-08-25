@@ -91,8 +91,8 @@ pub fn run_bounds(args: BoundsArgs) -> Result<(), EvalError> {
         let lb_path = args.output_dir.join(format!("output_{i}_lb.bin"));
         let ub_path = args.output_dir.join(format!("output_{i}_ub.bin"));
 
-        write_output_bin(&lb_path, &tensor.lb.inner().iter().copied().collect::<Vec<_>>())?;
-        write_output_bin(&ub_path, &tensor.ub.inner().iter().copied().collect::<Vec<_>>())?;
+        write_output_bin(&lb_path, &tensor.lb.iter().copied().collect::<Vec<_>>())?;
+        write_output_bin(&ub_path, &tensor.ub.iter().copied().collect::<Vec<_>>())?;
 
         println!("{}", lb_path.display());
         println!("{}", ub_path.display());

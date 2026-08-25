@@ -159,8 +159,8 @@ mod tests {
         let b: Tensor = array![10.0, 20.0, 30.0].into_dyn().into();
         let result = binary(&a, &b, |x, y| x + y).unwrap();
         assert_eq!(result.shape(), &[2, 3]);
-        assert_eq!(result.inner()[[0, 0]], 11.0);
-        assert_eq!(result.inner()[[1, 2]], 32.0);
+        assert_eq!(result[[0, 0]], 11.0);
+        assert_eq!(result[[1, 2]], 32.0);
     }
 
     #[test]
@@ -194,16 +194,16 @@ mod tests {
 
     #[test]
     fn reshape_c_flatten() {
-        let a = array![[1.0, 2.0], [3.0, 4.0]].into_dyn();
+        let a: Tensor = array![[1.0, 2.0], [3.0, 4.0]].into_dyn().into();
         let result = reshape_c(&a, &[4]);
-        assert_eq!(result, array![1.0, 2.0, 3.0, 4.0].into_dyn());
+        assert_eq!(result, array![1.0, 2.0, 3.0, 4.0].into_dyn().into());
     }
 
     #[test]
     fn reshape_c_unflatten() {
-        let a = array![1.0, 2.0, 3.0, 4.0].into_dyn();
+        let a: Tensor = array![1.0, 2.0, 3.0, 4.0].into_dyn().into();
         let result = reshape_c(&a, &[2, 2]);
-        assert_eq!(result, array![[1.0, 2.0], [3.0, 4.0]].into_dyn());
+        assert_eq!(result, array![[1.0, 2.0], [3.0, 4.0]].into_dyn().into());
     }
 
     // --- moveaxis tests ---
@@ -233,7 +233,7 @@ mod tests {
         .into();
         let result = a.moveaxis(0, 2);
         // original [0,1,2] = 012.0 should now be at [1,2,0]
-        assert_eq!(result.inner()[[1, 2, 0]], 12.0);
+        assert_eq!(result[[1, 2, 0]], 12.0);
     }
 
     #[test]
@@ -242,7 +242,7 @@ mod tests {
         let b: Tensor = array![4.0, 5.0, 6.0].into_dyn().into();
         let result = a.dot(&b).unwrap();
         assert_eq!(result.ndim(), 0);
-        assert_eq!(result.inner()[[]], 32.0); // 1*4 + 2*5 + 3*6
+        assert_eq!(result[[]], 32.0); // 1*4 + 2*5 + 3*6
     }
 
     #[test]
@@ -251,8 +251,8 @@ mod tests {
         let b: Tensor = array![[5.0, 6.0], [7.0, 8.0]].into_dyn().into();
         let result = a.dot(&b).unwrap();
         assert_eq!(result.shape(), &[2, 2]);
-        assert_eq!(result.inner()[[0, 0]], 19.0); // 1*5 + 2*7
-        assert_eq!(result.inner()[[1, 1]], 50.0); // 3*6 + 4*8
+        assert_eq!(result[[0, 0]], 19.0); // 1*5 + 2*7
+        assert_eq!(result[[1, 1]], 50.0); // 3*6 + 4*8
     }
 
     #[test]
@@ -261,8 +261,8 @@ mod tests {
         let b: Tensor = array![1.0, 1.0].into_dyn().into();
         let result = a.dot(&b).unwrap();
         assert_eq!(result.shape(), &[2]);
-        assert_eq!(result.inner()[[0]], 3.0);
-        assert_eq!(result.inner()[[1]], 7.0);
+        assert_eq!(result[[0]], 3.0);
+        assert_eq!(result[[1]], 7.0);
     }
 
     #[test]
@@ -272,7 +272,7 @@ mod tests {
         let b: Tensor = ArrayD::from_elem(IxDyn(&[4]), 2.0).into();
         let result = a.dot(&b).unwrap();
         assert_eq!(result.shape(), &[2, 3]);
-        assert!(result.inner().iter().all(|&x| x == 8.0)); // sum of 4 * (1*2)
+        assert!(result.iter().all(|&x| x == 8.0)); // sum of 4 * (1*2)
     }
 
     #[test]
@@ -282,7 +282,7 @@ mod tests {
         let b: Tensor = ArrayD::ones(IxDyn(&[3, 4])).into();
         let result = a.dot(&b).unwrap();
         assert_eq!(result.shape(), &[2, 4]);
-        assert!(result.inner().iter().all(|&x| x == 3.0));
+        assert!(result.iter().all(|&x| x == 3.0));
     }
 
     #[test]
@@ -291,7 +291,7 @@ mod tests {
         let b: Tensor = ArrayD::from_elem(IxDyn(&[2, 3]), 2.0).into();
         let result = a.dot(&b).unwrap();
         assert_eq!(result.shape(), &[2, 3]);
-        assert!(result.inner().iter().all(|&x| x == 6.0));
+        assert!(result.iter().all(|&x| x == 6.0));
     }
 
     #[test]
@@ -334,7 +334,7 @@ mod tests {
         let a: Tensor = array![1.0, 2.0, 3.0].into_dyn().into();
         let result = a.reduce_sum(&[0]);
         assert_eq!(result.shape(), &[] as &[usize]);
-        assert_eq!(result.inner()[[]], 6.0);
+        assert_eq!(result[[]], 6.0);
     }
 
     #[test]
@@ -342,7 +342,7 @@ mod tests {
         let a: Tensor = ArrayD::ones(IxDyn(&[2, 3, 4])).into();
         let result = a.reduce_sum(&[1]);
         assert_eq!(result.shape(), &[2, 4]);
-        assert!(result.inner().iter().all(|&x| x == 3.0));
+        assert!(result.iter().all(|&x| x == 3.0));
     }
 
     #[test]
@@ -350,7 +350,7 @@ mod tests {
         let a: Tensor = ArrayD::ones(IxDyn(&[2, 3, 4])).into();
         let result = a.reduce_sum(&[0, 2]);
         assert_eq!(result.shape(), &[3]);
-        assert!(result.inner().iter().all(|&x| x == 8.0)); // 2 * 4 * 1
+        assert!(result.iter().all(|&x| x == 8.0)); // 2 * 4 * 1
     }
 
     #[test]
@@ -421,10 +421,10 @@ mod tests {
             .into();
         let result = input.conv(&kernel, 1).unwrap();
         assert_eq!(result.shape(), &[1, 1, 2, 2]);
-        assert_eq!(result.inner()[[0, 0, 0, 0]], 12.0); // 1+2+4+5
-        assert_eq!(result.inner()[[0, 0, 0, 1]], 16.0); // 2+3+5+6
-        assert_eq!(result.inner()[[0, 0, 1, 0]], 24.0); // 4+5+7+8
-        assert_eq!(result.inner()[[0, 0, 1, 1]], 28.0); // 5+6+8+9
+        assert_eq!(result[[0, 0, 0, 0]], 12.0); // 1+2+4+5
+        assert_eq!(result[[0, 0, 0, 1]], 16.0); // 2+3+5+6
+        assert_eq!(result[[0, 0, 1, 0]], 24.0); // 4+5+7+8
+        assert_eq!(result[[0, 0, 1, 1]], 28.0); // 5+6+8+9
     }
 
     #[test]
@@ -447,15 +447,15 @@ mod tests {
         let result = input.conv(&kernel, 1).unwrap();
         assert_eq!(result.shape(), &[1, 2, 2, 2]);
         // channel 0: sliding sum
-        assert_eq!(result.inner()[[0, 0, 0, 0]], 12.0);
-        assert_eq!(result.inner()[[0, 0, 0, 1]], 16.0);
-        assert_eq!(result.inner()[[0, 0, 1, 0]], 24.0);
-        assert_eq!(result.inner()[[0, 0, 1, 1]], 28.0);
+        assert_eq!(result[[0, 0, 0, 0]], 12.0);
+        assert_eq!(result[[0, 0, 0, 1]], 16.0);
+        assert_eq!(result[[0, 0, 1, 0]], 24.0);
+        assert_eq!(result[[0, 0, 1, 1]], 28.0);
         // channel 1: top-left element of each window
-        assert_eq!(result.inner()[[0, 1, 0, 0]], 1.0);
-        assert_eq!(result.inner()[[0, 1, 0, 1]], 2.0);
-        assert_eq!(result.inner()[[0, 1, 1, 0]], 4.0);
-        assert_eq!(result.inner()[[0, 1, 1, 1]], 5.0);
+        assert_eq!(result[[0, 1, 0, 0]], 1.0);
+        assert_eq!(result[[0, 1, 0, 1]], 2.0);
+        assert_eq!(result[[0, 1, 1, 0]], 4.0);
+        assert_eq!(result[[0, 1, 1, 1]], 5.0);
     }
 
     #[test]
@@ -480,13 +480,13 @@ mod tests {
         let result = input.conv(&kernel, 1).unwrap();
         assert_eq!(result.shape(), &[1, 1, 2, 2]);
         // [0,0]: ch0 contrib=1, ch1 contrib=4 → 5
-        assert_eq!(result.inner()[[0, 0, 0, 0]], 5.0);
+        assert_eq!(result[[0, 0, 0, 0]], 5.0);
         // [0,1]: ch0=2, ch1=4 → 6
-        assert_eq!(result.inner()[[0, 0, 0, 1]], 6.0);
+        assert_eq!(result[[0, 0, 0, 1]], 6.0);
         // [1,0]: ch0=4, ch1=4 → 8
-        assert_eq!(result.inner()[[0, 0, 1, 0]], 8.0);
+        assert_eq!(result[[0, 0, 1, 0]], 8.0);
         // [1,1]: ch0=5, ch1=4 → 9
-        assert_eq!(result.inner()[[0, 0, 1, 1]], 9.0);
+        assert_eq!(result[[0, 0, 1, 1]], 9.0);
     }
 
     #[test]
@@ -502,10 +502,10 @@ mod tests {
             .into();
         let result = input.conv(&kernel, 2).unwrap();
         assert_eq!(result.shape(), &[1, 1, 2, 2]);
-        assert_eq!(result.inner()[[0, 0, 0, 0]], 1.0); // input[0,0,0,0]
-        assert_eq!(result.inner()[[0, 0, 0, 1]], 3.0); // input[0,0,0,2]
-        assert_eq!(result.inner()[[0, 0, 1, 0]], 9.0); // input[0,0,2,0]
-        assert_eq!(result.inner()[[0, 0, 1, 1]], 11.0); // input[0,0,2,2]
+        assert_eq!(result[[0, 0, 0, 0]], 1.0); // input[0,0,0,0]
+        assert_eq!(result[[0, 0, 0, 1]], 3.0); // input[0,0,0,2]
+        assert_eq!(result[[0, 0, 1, 0]], 9.0); // input[0,0,2,0]
+        assert_eq!(result[[0, 0, 1, 1]], 11.0); // input[0,0,2,2]
     }
 
     #[test]
@@ -522,10 +522,10 @@ mod tests {
             .into();
         let result = input.conv(&kernel, 1).unwrap();
         assert_eq!(result.shape(), &[2, 1, 2, 2]);
-        assert_eq!(result.inner()[[0, 0, 0, 0]], 2.0);
-        assert_eq!(result.inner()[[0, 0, 1, 1]], 8.0);
-        assert_eq!(result.inner()[[1, 0, 0, 0]], 10.0);
-        assert_eq!(result.inner()[[1, 0, 1, 1]], 16.0);
+        assert_eq!(result[[0, 0, 0, 0]], 2.0);
+        assert_eq!(result[[0, 0, 1, 1]], 8.0);
+        assert_eq!(result[[1, 0, 0, 0]], 10.0);
+        assert_eq!(result[[1, 0, 1, 1]], 16.0);
     }
 
     #[test]
@@ -563,9 +563,9 @@ mod tests {
         };
         let result = a.pool(&opt, false).unwrap();
         assert_eq!(result.shape(), &[3]);
-        assert_eq!(result.inner()[[0]], 3.0);
-        assert_eq!(result.inner()[[1]], 5.0);
-        assert_eq!(result.inner()[[2]], 7.0);
+        assert_eq!(result[[0]], 3.0);
+        assert_eq!(result[[1]], 5.0);
+        assert_eq!(result[[2]], 7.0);
     }
 
     #[test]
@@ -580,9 +580,9 @@ mod tests {
         };
         let result = a.pool(&opt, true).unwrap();
         assert_eq!(result.shape(), &[3]);
-        assert_eq!(result.inner()[[0]], 1.5);
-        assert_eq!(result.inner()[[1]], 2.5);
-        assert_eq!(result.inner()[[2]], 3.5);
+        assert_eq!(result[[0]], 1.5);
+        assert_eq!(result[[1]], 2.5);
+        assert_eq!(result[[2]], 3.5);
     }
 
     #[test]
@@ -597,8 +597,8 @@ mod tests {
         };
         let result = a.pool(&opt, false).unwrap();
         assert_eq!(result.shape(), &[2]);
-        assert_eq!(result.inner()[[0]], 3.0); // 1+2
-        assert_eq!(result.inner()[[1]], 7.0); // 3+4
+        assert_eq!(result[[0]], 3.0); // 1+2
+        assert_eq!(result[[1]], 7.0); // 3+4
     }
 
     #[test]
@@ -613,10 +613,10 @@ mod tests {
         };
         let result = a.pool(&opt, false).unwrap();
         assert_eq!(result.shape(), &[2, 2]);
-        assert_eq!(result.inner()[[0, 0]], 12.0); // 1+2+4+5
-        assert_eq!(result.inner()[[0, 1]], 16.0); // 2+3+5+6
-        assert_eq!(result.inner()[[1, 0]], 24.0); // 4+5+7+8
-        assert_eq!(result.inner()[[1, 1]], 28.0); // 5+6+8+9
+        assert_eq!(result[[0, 0]], 12.0); // 1+2+4+5
+        assert_eq!(result[[0, 1]], 16.0); // 2+3+5+6
+        assert_eq!(result[[1, 0]], 24.0); // 4+5+7+8
+        assert_eq!(result[[1, 1]], 28.0); // 5+6+8+9
     }
 
     #[test]
@@ -630,10 +630,10 @@ mod tests {
         };
         let result = a.pool(&opt, true).unwrap();
         assert_eq!(result.shape(), &[2, 2]);
-        assert_eq!(result.inner()[[0, 0]], 3.0); // 12/4
-        assert_eq!(result.inner()[[0, 1]], 4.0); // 16/4
-        assert_eq!(result.inner()[[1, 0]], 6.0); // 24/4
-        assert_eq!(result.inner()[[1, 1]], 7.0); // 28/4
+        assert_eq!(result[[0, 0]], 3.0); // 12/4
+        assert_eq!(result[[0, 1]], 4.0); // 16/4
+        assert_eq!(result[[1, 0]], 6.0); // 24/4
+        assert_eq!(result[[1, 1]], 7.0); // 28/4
     }
 
     #[test]
@@ -649,10 +649,10 @@ mod tests {
         };
         let result = a.pool(&opt, false).unwrap();
         assert_eq!(result.shape(), &[2, 2]);
-        assert_eq!(result.inner()[[0, 0]], 14.0); // 1+2+5+6
-        assert_eq!(result.inner()[[0, 1]], 22.0); // 3+4+7+8
-        assert_eq!(result.inner()[[1, 0]], 46.0); // 9+10+13+14
-        assert_eq!(result.inner()[[1, 1]], 54.0); // 11+12+15+16
+        assert_eq!(result[[0, 0]], 14.0); // 1+2+5+6
+        assert_eq!(result[[0, 1]], 22.0); // 3+4+7+8
+        assert_eq!(result[[1, 0]], 46.0); // 9+10+13+14
+        assert_eq!(result[[1, 1]], 54.0); // 11+12+15+16
     }
 
     #[test]

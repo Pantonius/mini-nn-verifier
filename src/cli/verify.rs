@@ -103,7 +103,7 @@ pub fn run_verify(args: VerifyArgs) -> Result<(), EvalError> {
         BaBResult::Unsafe(cex) => {
             for (i, arr) in cex.iter().enumerate() {
                 let path = args.output_dir.join(format!("counterexample_{i}.bin"));
-                write_output_bin(&path, &arr.inner().iter().copied().collect::<Vec<_>>())?;
+                write_output_bin(&path, &arr.iter().copied().collect::<Vec<_>>())?;
                 println!("{}", path.display());
             }
             println!("viol");

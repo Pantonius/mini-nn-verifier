@@ -43,7 +43,7 @@ pub fn run_eval(args: EvalArgs) -> Result<(), EvalError> {
 
     for (i, tensor) in outputs.iter().enumerate() {
         let path = args.output_dir.join(format!("output_{i}.bin"));
-        let values: Vec<f64> = tensor.inner().iter().copied().collect();
+        let values: Vec<f64> = tensor.iter().copied().collect();
         write_output_bin(&path, &values)?;
         println!("{}", path.display());
     }

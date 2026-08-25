@@ -268,22 +268,12 @@ pub fn run_train(args: TrainArgs) -> Result<(), EvalError> {
             // grads[0] = dx (unused), grads[1 + 2i] = dWi, grads[2 + 2i] = dbi
             let grads_w: Vec<Array2<f64>> = (0..layers.len())
                 .map(|i| {
-                    grads[1 + 2 * i]
-                        .inner()
-                        .view()
-                        .into_dimensionality::<ndarray::Ix2>()
-                        .unwrap()
-                        .to_owned()
+                    grads[1 + 2 * i].as_2d().to_owned()
                 })
                 .collect();
             let grads_b: Vec<Array1<f64>> = (0..layers.len())
                 .map(|i| {
-                    grads[2 + 2 * i]
-                        .inner()
-                        .view()
-                        .into_dimensionality::<ndarray::Ix1>()
-                        .unwrap()
-                        .to_owned()
+                    grads[2 + 2 * i].as_1d().to_owned()
                 })
                 .collect();
 

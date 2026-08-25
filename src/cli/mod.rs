@@ -15,8 +15,8 @@ use bounds::{BoundsArgs, run_bounds};
 mod verify;
 use verify::{VerifyArgs, run_verify};
 
-// mod affine_bounds;
-// use affine_bounds::{AffineBoundsArgs, run_affine_bounds};
+mod affine_bounds;
+use affine_bounds::{AffineBoundsArgs, run_affine_bounds};
 
 use mininn_verifier::{
     interpreters::{EvalError, concrete::eval_util::Tensor},
@@ -48,9 +48,9 @@ enum Command {
     Bounds(BoundsArgs),
     /// Input-Splitting BaB verification of non-zero output
     Verify(VerifyArgs),
-    // /// Propagates affine bounds through the entire network (backward)
-    // #[command(name = "affine_bounds")]
-    // AffineBounds(AffineBoundsArgs),
+    /// Propagates affine bounds through the entire network (backward)
+    #[command(name = "affine_bounds")]
+    AffineBounds(AffineBoundsArgs),
 }
 
 fn main() -> Result<(), EvalError> {
@@ -60,6 +60,6 @@ fn main() -> Result<(), EvalError> {
         Command::Train(args) => run_train(args),
         Command::Bounds(args) => run_bounds(args),
         Command::Verify(args) => run_verify(args),
-        // Command::AffineBounds(args) => run_affine_bounds(args),
+        Command::AffineBounds(args) => run_affine_bounds(args),
     }
 }

@@ -76,9 +76,9 @@ fn vjp_conv(
     let oh = (h - kh) / s + 1;
     let ow = (w - kw) / s + 1;
 
-    let t_arr = tangent.inner();
-    let inp_arr = input.inner();
-    let ker_arr = kernel.inner();
+    let t_arr = tangent.view();
+    let inp_arr = input.view();
+    let ker_arr = kernel.view();
 
     let mut d_input = ArrayD::zeros(IxDyn(&[n, c, h, w]));
     let mut d_kernel = ArrayD::zeros(IxDyn(kernel.shape()));
@@ -107,7 +107,7 @@ fn vjp_conv(
 }
 
 fn vjp_pad(tangent: &Tensor, a: &Tensor, opt: &PaddingOptions) -> Vec<Tensor> {
-    let mut arr = tangent.inner().clone();
+    let mut arr = tangent.clone().into_inner();
     for &ax in &opt.axes {
         let axis = norm_axis_index(ax, a.ndim());
         let si = a.shape()[axis];
@@ -132,7 +132,7 @@ fn vjp_pool(tangent: &Tensor, input: &Tensor, opt: &PoolOptions, average: bool) 
     let mut d_input = ArrayD::zeros(IxDyn(input.shape()));
     let window_size = opt.window_size.iter().product::<usize>() as f64;
 
-    for (out_idx, &t) in tangent.inner().indexed_iter() {
+    for (out_idx, &t) in tangent.view().indexed_iter() {
         let contrib = if average { t / window_size } else { t };
         for win_idx in indices(IxDyn(&opt.window_size)) {
             let in_idx: Vec<usize> = (0..input.ndim())
@@ -147,8 +147,8 @@ fn vjp_pool(tangent: &Tensor, input: &Tensor, opt: &PoolOptions, average: bool) 
 
 fn softmax_xent_vjp(logits: &Tensor, labels: &Tensor) -> Result<Tensor, EvalError> {
     let n = logits.shape()[0] as f64;
-    let logits_arr = logits.inner();
-    let labels_arr = labels.inner();
+    let logits_arr = logits.clone().into_inner();
+    let labels_arr = labels.clone().into_inner();
 
     let max = logits_arr.map_axis(Axis(1), |row| row.fold(f64::NEG_INFINITY, |a, &b| a.max(b)));
     let shifted = logits_arr - &max.insert_axis(Axis(1));
@@ -222,7 +222,7 @@ impl GradInterpreter {
                 let x = p(operand)?;
                 let expanded = tangent.expand_dims(axes);
                 let arr = expanded
-                    .inner()
+                    .view()
                     .broadcast(IxDyn(x.shape()))
                     .ok_or_else(|| EvalError::Eval("reduce_sum vjp: broadcast failed".to_string()))?
                     .to_owned();
@@ -387,52 +387,48 @@ mod tests {
     };
     use ndarray::{ArrayD, IxDyn};
 
-    fn carr(data: &[f64], shape: &[usize]) -> ArrayD<f64> {
-        ArrayD::from_shape_vec(IxDyn(shape), data.to_vec()).unwrap()
+    fn carr(data: &[f64], shape: &[usize]) -> Tensor {
+        ArrayD::from_shape_vec(IxDyn(shape), data.to_vec()).unwrap().into()
     }
 
     fn const_atom(data: &[f64], shape: &[usize]) -> Atom {
         Atom {
             name: String::new(),
             shape: shape.to_vec(),
-            kind: AtomKind::Const(carr(data, shape)),
+            kind: AtomKind::Const(carr(data, shape).into_inner()),
         }
     }
 
     /// Run VJP for `primitive`. `outvar_primal` must contain the forward-pass output
     /// for primitives that call `p(outvar)` (Sqrt, Exp, Relu); pass zeros otherwise.
-    fn run_vjp(
-        primitive: Primitive,
-        outvar_primal: ArrayD<f64>,
-        tangent: ArrayD<f64>,
-    ) -> Vec<Tensor> {
+    fn run_vjp(primitive: Primitive, outvar_primal: Tensor, tangent: Tensor) -> Vec<Tensor> {
         let outvar = Atom {
             name: "out".to_string(),
             shape: tangent.shape().to_vec(),
             kind: AtomKind::Var,
         };
         let mut primals: Env<Tensor> = Env::new();
-        primals.insert("out".to_string(), outvar_primal.into());
+        primals.insert("out".to_string(), outvar_primal);
         let mut env: Env<Tensor> = Env::new();
-        env.insert("out".to_string(), tangent.into());
+        env.insert("out".to_string(), tangent);
         GradInterpreter::process_primitive(&primitive, &outvar, &primals, &env).unwrap()
     }
 
-    fn ones(shape: &[usize]) -> ArrayD<f64> {
-        ArrayD::ones(IxDyn(shape))
+    fn ones(shape: &[usize]) -> Tensor {
+        ArrayD::ones(IxDyn(shape)).into()
     }
-    fn zeros(shape: &[usize]) -> ArrayD<f64> {
-        ArrayD::zeros(IxDyn(shape))
+    fn zeros(shape: &[usize]) -> Tensor {
+        ArrayD::zeros(IxDyn(shape)).into()
     }
 
-    fn assert_close(a: &ArrayD<f64>, b: &ArrayD<f64>) {
+    fn assert_close(a: &Tensor, b: &Tensor) {
         assert_eq!(a.shape(), b.shape(), "shapes differ");
         for (x, y) in a.iter().zip(b.iter()) {
             assert!((x - y).abs() < 1e-9, "values differ: {x} vs {y}");
         }
     }
 
-    fn assert_close_tol(a: &ArrayD<f64>, b: &ArrayD<f64>, tol: f64) {
+    fn assert_close_tol(a: &Tensor, b: &Tensor, tol: f64) {
         assert_eq!(a.shape(), b.shape(), "shapes differ");
         for (x, y) in a.iter().zip(b.iter()) {
             assert!((x - y).abs() < tol, "values differ: {x} vs {y} (tol {tol})");
@@ -440,25 +436,23 @@ mod tests {
     }
 
     /// Numerical VJP via central differences.
-    fn num_vjp(
-        x: &ArrayD<f64>,
-        tangent: &ArrayD<f64>,
-        f: impl Fn(&ArrayD<f64>) -> ArrayD<f64>,
-    ) -> ArrayD<f64> {
+    fn num_vjp(x: &Tensor, tangent: &Tensor, f: impl Fn(&Tensor) -> Tensor) -> Tensor {
         let eps = 1e-5;
-        let x_flat: Vec<f64> = x.iter().copied().collect();
+        let x_arr = x.view();
+        let tangent_arr = tangent.view();
+        let x_flat: Vec<f64> = x_arr.iter().copied().collect();
         let grad_flat: Vec<f64> = (0..x_flat.len())
             .map(|i| {
                 let mut xp = x_flat.clone();
                 let mut xm = x_flat.clone();
                 xp[i] += eps;
                 xm[i] -= eps;
-                let fp = f(&ArrayD::from_shape_vec(x.raw_dim(), xp).unwrap());
-                let fm = f(&ArrayD::from_shape_vec(x.raw_dim(), xm).unwrap());
-                ((&fp - &fm) / (2.0 * eps) * tangent).sum()
+                let fp = f(&ArrayD::from_shape_vec(x_arr.raw_dim(), xp).unwrap().into());
+                let fm = f(&ArrayD::from_shape_vec(x_arr.raw_dim(), xm).unwrap().into());
+                ((fp.view() - fm.view()) / (2.0 * eps) * tangent_arr).sum()
             })
             .collect();
-        ArrayD::from_shape_vec(x.raw_dim(), grad_flat).unwrap()
+        ArrayD::from_shape_vec(x_arr.raw_dim(), grad_flat).unwrap().into()
     }
 
     // ---- unary ----
@@ -471,7 +465,7 @@ mod tests {
             zeros(&[3]),
             t.clone(),
         );
-        assert_close(g[0].inner(), &t.mapv(|x| -x));
+        assert_close(&g[0], &t.mapv(|x| -x));
     }
 
     #[test]
@@ -484,11 +478,7 @@ mod tests {
             zeros(&[3]),
             t.clone(),
         );
-        assert_close_tol(
-            g[0].inner(),
-            &num_vjp(&x, &t, |a| a.mapv(|v| 1.0 / v)),
-            1e-9,
-        );
+        assert_close_tol(&g[0], &num_vjp(&x, &t, |a| a.mapv(|v| 1.0 / v)), 1e-9);
     }
 
     #[test]
@@ -501,7 +491,7 @@ mod tests {
             zeros(&[3]),
             t.clone(),
         );
-        assert_close_tol(g[0].inner(), &num_vjp(&x, &t, |a| a.mapv(|v| v * v)), 1e-9);
+        assert_close_tol(&g[0], &num_vjp(&x, &t, |a| a.mapv(|v| v * v)), 1e-9);
     }
 
     #[test]
@@ -515,7 +505,7 @@ mod tests {
             outvar_primal,
             t.clone(),
         );
-        assert_close_tol(g[0].inner(), &num_vjp(&x, &t, |a| a.mapv(f64::sqrt)), 1e-9);
+        assert_close_tol(&g[0], &num_vjp(&x, &t, |a| a.mapv(f64::sqrt)), 1e-9);
     }
 
     #[test]
@@ -529,7 +519,7 @@ mod tests {
             outvar_primal,
             t.clone(),
         );
-        assert_close_tol(g[0].inner(), &num_vjp(&x, &t, |a| a.mapv(f64::exp)), 1e-9);
+        assert_close_tol(&g[0], &num_vjp(&x, &t, |a| a.mapv(f64::exp)), 1e-9);
     }
 
     #[test]
@@ -538,7 +528,7 @@ mod tests {
         let x = carr(xd, &[3]);
         let t = carr(&[2.0, 1.0, 3.0], &[3]);
         let g = run_vjp(Primitive::Log(const_atom(xd, &[3])), zeros(&[3]), t.clone());
-        assert_close_tol(g[0].inner(), &num_vjp(&x, &t, |a| a.mapv(f64::ln)), 1e-9);
+        assert_close_tol(&g[0], &num_vjp(&x, &t, |a| a.mapv(f64::ln)), 1e-9);
     }
 
     // ---- binary ----
@@ -551,8 +541,8 @@ mod tests {
             zeros(&[3]),
             t.clone(),
         );
-        assert_close(g[0].inner(), &t);
-        assert_close(g[1].inner(), &t);
+        assert_close(&g[0], &t);
+        assert_close(&g[1], &t);
     }
 
     #[test]
@@ -567,8 +557,8 @@ mod tests {
             zeros(&[3]),
             t.clone(),
         );
-        assert_close(g[0].inner(), &(&t * &b));
-        assert_close(g[1].inner(), &(&a * &t));
+        assert_close(&g[0], &(&t * &b));
+        assert_close(&g[1], &(&a * &t));
     }
 
     #[test]
@@ -583,9 +573,9 @@ mod tests {
             zeros(&[2]),
             t.clone(),
         );
-        assert_close(g[0].inner(), &zeros(&[2])); // d_cond = 0
-        assert_close(g[1].inner(), &t); // d_x = t
-        assert_close(g[2].inner(), &zeros(&[2])); // d_y = 0
+        assert_close(&g[0], &zeros(&[2])); // d_cond = 0
+        assert_close(&g[1], &t); // d_x = t
+        assert_close(&g[2], &zeros(&[2])); // d_y = 0
     }
 
     #[test]
@@ -600,9 +590,9 @@ mod tests {
             zeros(&[2]),
             t.clone(),
         );
-        assert_close(g[0].inner(), &zeros(&[2]));
-        assert_close(g[1].inner(), &zeros(&[2])); // d_x = 0
-        assert_close(g[2].inner(), &t); // d_y = t
+        assert_close(&g[0], &zeros(&[2]));
+        assert_close(&g[1], &zeros(&[2])); // d_x = 0
+        assert_close(&g[2], &t); // d_y = t
     }
 
     // ---- activations ----
@@ -614,7 +604,7 @@ mod tests {
             carr(&[2.0, 0.0, 0.0], &[3]), // outvar_primal = relu(x)
             ones(&[3]),
         );
-        assert_close(g[0].inner(), &carr(&[1.0, 0.0, 0.0], &[3]));
+        assert_close(&g[0], &carr(&[1.0, 0.0, 0.0], &[3]));
     }
 
     #[test]
@@ -628,7 +618,7 @@ mod tests {
             zeros(&[2]),
             ones(&[2]),
         );
-        assert_close_tol(g[0].inner(), &carr(&[1.0, slope], &[2]), 1e-10);
+        assert_close_tol(&g[0], &carr(&[1.0, slope], &[2]), 1e-10);
     }
 
     #[test]
@@ -641,25 +631,21 @@ mod tests {
             zeros(&[3]),
             t.clone(),
         );
-        assert_close_tol(
-            g[0].inner(),
-            &num_vjp(&x, &t, |a| a.mapv(|x| normcdf(x))),
-            1e-8,
-        );
+        assert_close_tol(&g[0], &num_vjp(&x, &t, |a| a.mapv(|x| normcdf(x))), 1e-8);
     }
 
     // ---- linear algebra ----
 
     #[test]
     fn dot_1d_1d() {
-        let t = ArrayD::from_elem(IxDyn(&[]), 1.0);
+        let t: Tensor = ArrayD::from_elem(IxDyn(&[]), 1.0).into();
         let g = run_vjp(
             Primitive::Dot(const_atom(&[1.0, 2.0], &[2]), const_atom(&[3.0, 4.0], &[2])),
-            ArrayD::from_elem(IxDyn(&[]), 11.0),
+            ArrayD::from_elem(IxDyn(&[]), 11.0).into(),
             t,
         );
-        assert_close(g[0].inner(), &carr(&[3.0, 4.0], &[2]));
-        assert_close(g[1].inner(), &carr(&[1.0, 2.0], &[2]));
+        assert_close(&g[0], &carr(&[3.0, 4.0], &[2]));
+        assert_close(&g[1], &carr(&[1.0, 2.0], &[2]));
     }
 
     #[test]
@@ -673,8 +659,8 @@ mod tests {
             zeros(&[2, 2]),
             t,
         );
-        assert_close(g[0].inner(), &carr(&[11.0, 15.0, 11.0, 15.0], &[2, 2]));
-        assert_close(g[1].inner(), &carr(&[4.0, 4.0, 6.0, 6.0], &[2, 2]));
+        assert_close(&g[0], &carr(&[11.0, 15.0, 11.0, 15.0], &[2, 2]));
+        assert_close(&g[1], &carr(&[4.0, 4.0, 6.0, 6.0], &[2, 2]));
     }
 
     #[test]
@@ -688,8 +674,8 @@ mod tests {
             zeros(&[2]),
             t,
         );
-        assert_close(g[0].inner(), &carr(&[1.0, 1.0, 1.0, 1.0], &[2, 2]));
-        assert_close(g[1].inner(), &carr(&[4.0, 6.0], &[2]));
+        assert_close(&g[0], &carr(&[1.0, 1.0, 1.0, 1.0], &[2, 2]));
+        assert_close(&g[1], &carr(&[4.0, 6.0], &[2]));
     }
 
     #[test]
@@ -703,11 +689,8 @@ mod tests {
             zeros(&[2]),
             t,
         );
-        assert_close(
-            g[0].inner(),
-            &carr(&[1.0, 0.0, 0.0, 1.0, 0.0, 0.0], &[2, 3]),
-        );
-        assert_close(g[1].inner(), &carr(&[5.0, 7.0, 9.0], &[3]));
+        assert_close(&g[0], &carr(&[1.0, 0.0, 0.0, 1.0, 0.0, 0.0], &[2, 3]));
+        assert_close(&g[1], &carr(&[5.0, 7.0, 9.0], &[3]));
     }
 
     // ---- reduction ----
@@ -723,10 +706,7 @@ mod tests {
             zeros(&[2]),
             t,
         );
-        assert_close(
-            g[0].inner(),
-            &carr(&[1.0, 1.0, 1.0, 2.0, 2.0, 2.0], &[2, 3]),
-        );
+        assert_close(&g[0], &carr(&[1.0, 1.0, 1.0, 2.0, 2.0, 2.0], &[2, 3]));
     }
 
     #[test]
@@ -741,7 +721,7 @@ mod tests {
             t,
         );
         let expected: Vec<f64> = [1.0, 2.0, 3.0].iter().flat_map(|&v| vec![v; 4]).collect();
-        assert_close(g[0].inner(), &carr(&expected, &[3, 4]));
+        assert_close(&g[0], &carr(&expected, &[3, 4]));
     }
 
     // ---- shape manipulation ----
@@ -757,7 +737,7 @@ mod tests {
             zeros(&[1, 3]),
             t,
         );
-        assert_close(g[0].inner(), &carr(&[2.0, 3.0, 4.0], &[3]));
+        assert_close(&g[0], &carr(&[2.0, 3.0, 4.0], &[3]));
     }
 
     #[test]
@@ -771,7 +751,7 @@ mod tests {
             zeros(&[3, 1]),
             t,
         );
-        assert_close(g[0].inner(), &carr(&[1.0, 2.0, 3.0], &[3]));
+        assert_close(&g[0], &carr(&[1.0, 2.0, 3.0], &[3]));
     }
 
     #[test]
@@ -786,10 +766,7 @@ mod tests {
             zeros(&[3, 2]),
             t,
         );
-        assert_close(
-            g[0].inner(),
-            &carr(&[1.0, 3.0, 5.0, 2.0, 4.0, 6.0], &[2, 3]),
-        );
+        assert_close(&g[0], &carr(&[1.0, 3.0, 5.0, 2.0, 4.0, 6.0], &[2, 3]));
     }
 
     #[test]
@@ -803,6 +780,6 @@ mod tests {
             zeros(&[2, 3]),
             t,
         );
-        assert_close(g[0].inner(), &carr(&[1.0, 0.0, 0.0, 0.0, 0.0, 0.0], &[6]));
+        assert_close(&g[0], &carr(&[1.0, 0.0, 0.0, 0.0, 0.0, 0.0], &[6]));
     }
 }
