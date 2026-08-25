@@ -1,6 +1,6 @@
-use std::ops::{Add, Div, Mul, Neg};
+use std::ops::{Add, Div, Index, Mul, Neg, Sub};
 
-use ndarray::{ArrayD, Axis, Ix0, Ix1, Ix2, IxDyn, Zip, arr0, indices, linalg::Dot};
+use ndarray::{ArrayD, ArrayView, ArrayView1, ArrayView2, Axis, Ix0, Ix1, Ix2, IxDyn, IntoNdProducer, NdIndex, Zip, arr0, indices, linalg::Dot};
 
 use crate::{
     interpreters::EvalError,
@@ -49,9 +49,11 @@ pub fn broadcast_shape(a: &[usize], b: &[usize]) -> Option<Vec<usize>> {
 /// NOTE on terminology:
 /// - C stands for contigous, mathematically speaking row-major order
 /// - F stands for fortran-contigous, mathematically speaking column-major order
-pub fn reshape_c(a: &ArrayD<f64>, shape: &[usize]) -> ArrayD<f64> {
-    let data: Vec<f64> = a.iter().copied().collect();
-    ArrayD::from_shape_vec(IxDyn(shape), data).expect("reshape element count mismatch")
+pub fn reshape_c(a: &Tensor, shape: &[usize]) -> Tensor {
+    let data: Vec<f64> = a.inner.iter().copied().collect();
+    ArrayD::from_shape_vec(IxDyn(shape), data)
+        .expect("reshape element count mismatch")
+        .into()
 }
 
 /// Elementwise binary op with numpy broadcasting.
@@ -93,11 +95,29 @@ pub struct Tensor {
     inner: ArrayD<f64>,
 }
 
+impl<'a> IntoNdProducer for &'a Tensor {
+    type Item = &'a f64;
+    type Dim = IxDyn;
+    type Output = ArrayView<'a, f64, IxDyn>;
+
+    fn into_producer(self) -> Self::Output {
+        self.inner.view()
+    }
+}
+
 impl Neg for Tensor {
     type Output = Self;
 
     fn neg(self) -> Self::Output {
         (-self.inner).into()
+    }
+}
+
+impl Neg for &Tensor {
+    type Output = Tensor;
+
+    fn neg(self) -> Tensor {
+        self.mapv(|x| -x)
     }
 }
 
@@ -109,6 +129,30 @@ impl Add for Tensor {
     }
 }
 
+impl Add for &Tensor {
+    type Output = Tensor;
+
+    fn add(self, rhs: &Tensor) -> Tensor {
+        binary(self, rhs, |a, b| a + b).unwrap()
+    }
+}
+
+impl Sub for Tensor {
+    type Output = Self;
+
+    fn sub(self, rhs: Self) -> Self::Output {
+        binary(&self, &rhs, |a, b| a - b).unwrap()
+    }
+}
+
+impl Sub for &Tensor {
+    type Output = Tensor;
+
+    fn sub(self, rhs: &Tensor) -> Tensor {
+        binary(self, rhs, |a, b| a - b).unwrap()
+    }
+}
+
 impl Mul for Tensor {
     type Output = Self;
 
@@ -117,13 +161,45 @@ impl Mul for Tensor {
     }
 }
 
-impl Tensor {
-    pub fn inner(&self) -> &ArrayD<f64> {
-        &self.inner
-    }
+impl Mul for &Tensor {
+    type Output = Tensor;
 
+    fn mul(self, rhs: &Tensor) -> Tensor {
+        binary(self, rhs, |a, b| a * b).unwrap()
+    }
+}
+
+impl<Idx: NdIndex<IxDyn>> Index<Idx> for Tensor {
+    type Output = f64;
+
+    fn index(&self, idx: Idx) -> &f64 {
+        &self.inner[idx]
+    }
+}
+
+impl Tensor {
     pub fn into_inner(self) -> ArrayD<f64> {
         self.inner
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = &f64> {
+        self.inner.iter()
+    }
+
+    pub fn view(&self) -> ArrayView<f64, IxDyn> {
+        self.inner.view()
+    }
+
+    pub fn index_axis(&self, axis: Axis, index: usize) -> Tensor {
+        self.inner.index_axis(axis, index).to_owned().into()
+    }
+
+    pub fn as_1d(&self) -> ArrayView1<f64> {
+        self.inner.view().into_dimensionality::<Ix1>().unwrap()
+    }
+
+    pub fn as_2d(&self) -> ArrayView2<f64> {
+        self.inner.view().into_dimensionality::<Ix2>().unwrap()
     }
 
     pub fn mapv(&self, f: impl Fn(f64) -> f64) -> Self {
@@ -309,7 +385,7 @@ impl Value for Tensor {
 
         let k = ash[ash.len() - 1];
         let a_prelim_shape = [ash[..ash.len() - 1].iter().product(), k];
-        let a2 = reshape_c(&self.inner, &a_prelim_shape);
+        let a2 = reshape_c(self, &a_prelim_shape).into_inner();
 
         // If a is an N-D array and b is a 1-D array, it is a sum product over the last axis of a and b.
         if bsh.len() == 1 {
@@ -320,7 +396,7 @@ impl Value for Tensor {
             }
 
             let prelim_res = a2.dot(&b.inner);
-            return Ok(reshape_c(&prelim_res, &ash[..ash.len() - 1]).into());
+            return Ok(reshape_c(&prelim_res.into(), &ash[..ash.len() - 1]));
         }
 
         // If a is an N-D array and b is an M-D array (where M>=2), it is a sum product over the last axis of a and the second-to-last axis of b:
@@ -332,7 +408,7 @@ impl Value for Tensor {
 
         let b_moved = Self::moveaxis(b, -2, 0); // move
         let b_prelim_shape = [k, b_moved.shape()[1..].iter().product()]; // flatten
-        let b2 = reshape_c(&b_moved.inner, &b_prelim_shape); // apply
+        let b2 = reshape_c(&b_moved, &b_prelim_shape).into_inner(); // apply
 
         let prelim_res = a2.dot(&b2); // flat result
 
@@ -340,7 +416,7 @@ impl Value for Tensor {
         out_shape.extend_from_slice(&bsh[..bsh.len() - 2]);
         out_shape.push(bsh[bsh.len() - 1]);
 
-        Ok(reshape_c(&prelim_res, &out_shape).into()) // unflattened result
+        Ok(reshape_c(&prelim_res.into(), &out_shape)) // unflattened result
     }
 
     /// Sum over the given axes (numpy default: axes are removed).
@@ -410,7 +486,7 @@ impl Value for Tensor {
             )));
         }
 
-        Ok(reshape_c(&self.inner, &shape).into())
+        Ok(reshape_c(self, &shape))
     }
 
     /// jax.lax.pad: per listed axis, add `left`/`right` padding and `interior`

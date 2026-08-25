@@ -1,7 +1,5 @@
 use std::ops::{Add, Mul};
 
-use ndarray::ArrayD;
-
 use crate::{interpreters::concrete::eval_util::Tensor, mininn::Value};
 
 // ================================
@@ -14,31 +12,28 @@ pub struct ABPTensor {
 }
 
 impl Mul for ABPTensor {
-    type Output = ABPTensor;
+    type Output = Self;
 
     fn mul(self, rhs: Self) -> Self::Output {
-        todo!()
+        Self {
+            todo!()
+        }
     }
 }
 
 impl Add for ABPTensor {
-    type Output = ABPTensor;
+    type Output = Self;
 
     fn add(self, rhs: Self) -> Self::Output {
-        todo!()
+        Self {
+            weights: self.weights + rhs.weights,
+            biases: self.biases + rhs.biases,
+        }
     }
 }
 
-impl Value for ABPTensor {
-    fn from_tensor(tensor: &ArrayD<f64>) -> Self {
-        todo!()
-    }
-}
+impl Value for ABPTensor {}
 
 // ================================
 // TODO ABPTensor Batched
-// ================================
-
-// ================================
-// ABP Helper Functions
 // ================================

@@ -1,6 +1,6 @@
-use std::ops::{Add, Mul, Neg};
+use std::ops::{Add, Mul, Neg, Sub};
 
-use ndarray::{ArrayD, ArrayView, Axis, Ix2, Zip, arr0};
+use ndarray::{ArrayD, ArrayView, Axis, Zip, arr0};
 
 use crate::{
     interpreters::{
@@ -59,11 +59,67 @@ impl Add for IBPTensor {
     }
 }
 
+impl Add for &IBPTensor {
+    type Output = IBPTensor;
+
+    fn add(self, rhs: &IBPTensor) -> IBPTensor {
+        IBPTensor {
+            lb: &self.lb + &rhs.lb,
+            ub: &self.ub + &rhs.ub,
+            is_point: self.is_point && rhs.is_point,
+        }
+    }
+}
+
+impl Mul for &IBPTensor {
+    type Output = IBPTensor;
+
+    fn mul(self, rhs: &IBPTensor) -> IBPTensor {
+        let a = &self.lb * &rhs.lb;
+        let b = &self.lb * &rhs.ub;
+        let c = &self.ub * &rhs.lb;
+        let d = &self.ub * &rhs.ub;
+        IBPTensor::new(min4(&a, &b, &c, &d), max4(&a, &b, &c, &d))
+    }
+}
+
 impl Neg for IBPTensor {
     type Output = IBPTensor;
 
     fn neg(self) -> Self::Output {
         IBPTensor::new(-self.ub, -self.lb)
+    }
+}
+
+impl Neg for &IBPTensor {
+    type Output = IBPTensor;
+
+    fn neg(self) -> IBPTensor {
+        IBPTensor::new(-&self.ub, -&self.lb)
+    }
+}
+
+impl Sub for IBPTensor {
+    type Output = IBPTensor;
+
+    fn sub(self, rhs: Self) -> IBPTensor {
+        IBPTensor {
+            lb: self.lb - rhs.ub,
+            ub: self.ub - rhs.lb,
+            is_point: self.is_point && rhs.is_point,
+        }
+    }
+}
+
+impl Sub for &IBPTensor {
+    type Output = IBPTensor;
+
+    fn sub(self, rhs: &IBPTensor) -> IBPTensor {
+        IBPTensor {
+            lb: &self.lb - &rhs.ub,
+            ub: &self.ub - &rhs.lb,
+            is_point: self.is_point && rhs.is_point,
+        }
     }
 }
 
@@ -192,8 +248,8 @@ impl IBPBatchedTensor {
     }
 
     pub fn get(&self, i: usize) -> IBPTensor {
-        let lb: Tensor = self.lb.inner().index_axis(Axis(0), i).to_owned().into();
-        let ub: Tensor = self.ub.inner().index_axis(Axis(0), i).to_owned().into();
+        let lb = self.lb.index_axis(Axis(0), i);
+        let ub = self.ub.index_axis(Axis(0), i);
         IBPTensor::new(lb, ub)
     }
 
@@ -202,11 +258,11 @@ impl IBPBatchedTensor {
 
         let lbs: Vec<ArrayView<f64, _>> = input_tensors
             .iter()
-            .map(|v| v[idx].lb.inner().view())
+            .map(|v| v[idx].lb.view())
             .collect();
         let ubs: Vec<ArrayView<f64, _>> = input_tensors
             .iter()
-            .map(|v| v[idx].ub.inner().view())
+            .map(|v| v[idx].ub.view())
             .collect();
 
         Self {
@@ -267,10 +323,10 @@ impl IBPBatchedTensor {
     ) -> Result<Tensor, EvalError> {
         let sh = input.shape().to_vec();
         let (k, n) = (sh[0], sh[1]);
-        let flat: Tensor = reshape_c(input.inner(), &[k * n, sh[2], sh[3], sh[4]]).into();
+        let flat = reshape_c(input, &[k * n, sh[2], sh[3], sh[4]]);
         let out = flat.conv(kernel, stride)?;
         let osh = out.shape().to_vec();
-        Ok(reshape_c(out.inner(), &[k, n, osh[1], osh[2], osh[3]]).into())
+        Ok(reshape_c(&out, &[k, n, osh[1], osh[2], osh[3]]))
     }
 
     pub(crate) fn pool_batched(
@@ -281,10 +337,10 @@ impl IBPBatchedTensor {
         if a.ndim() == 5 {
             let sh = a.shape().to_vec();
             let (k, n) = (sh[0], sh[1]);
-            let flat: Tensor = reshape_c(a.inner(), &[k * n, sh[2], sh[3], sh[4]]).into();
+            let flat = reshape_c(a, &[k * n, sh[2], sh[3], sh[4]]);
             let out = flat.pool(opt, average)?;
             let osh = out.shape().to_vec();
-            Ok(reshape_c(out.inner(), &[k, n, osh[1], osh[2], osh[3]]).into())
+            Ok(reshape_c(&out, &[k, n, osh[1], osh[2], osh[3]]))
         } else {
             a.pool(opt, average)
         }
@@ -295,8 +351,8 @@ impl From<&Vec<IBPTensor>> for IBPBatchedTensor {
     fn from(tensors: &Vec<IBPTensor>) -> Self {
         assert!(!tensors.is_empty(), "cannot batch zero tensors");
 
-        let lbs: Vec<ArrayView<f64, _>> = tensors.iter().map(|t| t.lb.inner().view()).collect();
-        let ubs: Vec<ArrayView<f64, _>> = tensors.iter().map(|t| t.ub.inner().view()).collect();
+        let lbs: Vec<ArrayView<f64, _>> = tensors.iter().map(|t| t.lb.view()).collect();
+        let ubs: Vec<ArrayView<f64, _>> = tensors.iter().map(|t| t.ub.view()).collect();
 
         IBPBatchedTensor {
             lb: ndarray::stack(Axis(0), &lbs)
@@ -320,6 +376,17 @@ impl Add for IBPBatchedTensor {
     }
 }
 
+impl Add for &IBPBatchedTensor {
+    type Output = IBPBatchedTensor;
+
+    fn add(self, rhs: &IBPBatchedTensor) -> IBPBatchedTensor {
+        IBPBatchedTensor {
+            lb: &self.lb + &rhs.lb,
+            ub: &self.ub + &rhs.ub,
+        }
+    }
+}
+
 impl Mul for IBPBatchedTensor {
     type Output = IBPBatchedTensor;
 
@@ -336,6 +403,21 @@ impl Mul for IBPBatchedTensor {
     }
 }
 
+impl Mul for &IBPBatchedTensor {
+    type Output = IBPBatchedTensor;
+
+    fn mul(self, rhs: &IBPBatchedTensor) -> IBPBatchedTensor {
+        let a = &self.lb * &rhs.lb;
+        let b = &self.lb * &rhs.ub;
+        let c = &self.ub * &rhs.lb;
+        let d = &self.ub * &rhs.ub;
+        IBPBatchedTensor {
+            lb: min4(&a, &b, &c, &d),
+            ub: max4(&a, &b, &c, &d),
+        }
+    }
+}
+
 impl Neg for IBPBatchedTensor {
     type Output = IBPBatchedTensor;
 
@@ -343,6 +425,39 @@ impl Neg for IBPBatchedTensor {
         IBPBatchedTensor {
             lb: -self.ub,
             ub: -self.lb,
+        }
+    }
+}
+
+impl Neg for &IBPBatchedTensor {
+    type Output = IBPBatchedTensor;
+
+    fn neg(self) -> IBPBatchedTensor {
+        IBPBatchedTensor {
+            lb: -&self.ub,
+            ub: -&self.lb,
+        }
+    }
+}
+
+impl Sub for IBPBatchedTensor {
+    type Output = IBPBatchedTensor;
+
+    fn sub(self, rhs: Self) -> IBPBatchedTensor {
+        IBPBatchedTensor {
+            lb: self.lb - rhs.ub,
+            ub: self.ub - rhs.lb,
+        }
+    }
+}
+
+impl Sub for &IBPBatchedTensor {
+    type Output = IBPBatchedTensor;
+
+    fn sub(self, rhs: &IBPBatchedTensor) -> IBPBatchedTensor {
+        IBPBatchedTensor {
+            lb: &self.lb - &rhs.ub,
+            ub: &self.ub - &rhs.lb,
         }
     }
 }
@@ -403,8 +518,8 @@ impl Value for IBPBatchedTensor {
             ibp_linear(
                 |act, w| {
                     if act.ndim() == 2 && w.ndim() == 2 {
-                        let a2 = act.inner().view().into_dimensionality::<Ix2>().unwrap();
-                        let w2 = w.inner().view().into_dimensionality::<Ix2>().unwrap();
+                        let a2 = act.as_2d();
+                        let w2 = w.as_2d();
                         Ok(a2.dot(&w2.t()).into_dyn().into())
                     } else if act.ndim() == 2 && w.ndim() == 1 {
                         act.dot(w)
@@ -601,10 +716,10 @@ pub(crate) fn ibp_gelu(tensor: &IBPTensor) -> IBPTensor {
     let yl = tensor.lb.gelu();
     let yr = tensor.ub.gelu();
 
-    let lb = Zip::from(tensor.lb.inner())
-        .and(tensor.ub.inner())
-        .and(yl.inner())
-        .and(yr.inner())
+    let lb = Zip::from(&tensor.lb)
+        .and(&tensor.ub)
+        .and(&yl)
+        .and(&yr)
         .map_collect(|&x_lb, &x_ub, &yl, &yr| {
             if x_lb >= GELU_ARG_MIN {
                 yl
@@ -615,10 +730,10 @@ pub(crate) fn ibp_gelu(tensor: &IBPTensor) -> IBPTensor {
             }
         });
 
-    let ub = Zip::from(tensor.lb.inner())
-        .and(tensor.ub.inner())
-        .and(yl.inner())
-        .and(yr.inner())
+    let ub = Zip::from(&tensor.lb)
+        .and(&tensor.ub)
+        .and(&yl)
+        .and(&yr)
         .map_collect(|&x_lb, &x_ub, &yl, &yr| {
             if x_lb >= GELU_ARG_MIN {
                 yr
@@ -637,19 +752,19 @@ pub(crate) fn ibp_gelu(tensor: &IBPTensor) -> IBPTensor {
 // ================================
 
 pub(crate) fn min4(a: &Tensor, b: &Tensor, c: &Tensor, d: &Tensor) -> Tensor {
-    Zip::from(a.inner())
-        .and(b.inner())
-        .and(c.inner())
-        .and(d.inner())
+    Zip::from(a)
+        .and(b)
+        .and(c)
+        .and(d)
         .map_collect(|a, b, c, d| a.min(*b).min(*c).min(*d))
         .into()
 }
 
 pub(crate) fn max4(a: &Tensor, b: &Tensor, c: &Tensor, d: &Tensor) -> Tensor {
-    Zip::from(a.inner())
-        .and(b.inner())
-        .and(c.inner())
-        .and(d.inner())
+    Zip::from(a)
+        .and(b)
+        .and(c)
+        .and(d)
         .map_collect(|a, b, c, d| a.max(*b).max(*c).max(*d))
         .into()
 }
@@ -661,23 +776,23 @@ where
     if a.is_point() {
         let x = a.lb.clone();
         let y_mid = (b.ub.clone() + b.lb.clone()) * 0.5;
-        let y_ran = (b.ub.clone() + (-b.lb.clone())) * 0.5;
+        let y_ran = (b.ub.clone() - b.lb.clone()) * 0.5;
         let out_mid = f(&x, &y_mid)?;
         let out_ran = f(&x.mapv(|v| v.abs()), &y_ran)?;
 
         Ok(IBPTensor::new(
-            out_mid.clone() + (-out_ran.clone()),
+            out_mid.clone() - out_ran.clone(),
             out_mid + out_ran,
         ))
     } else if b.is_point() {
         let y = b.lb.clone();
         let x_mid = (a.lb.clone() + a.ub.clone()) * 0.5;
-        let x_ran = (a.ub.clone() + (-a.lb.clone())) * 0.5;
+        let x_ran = (a.ub.clone() - a.lb.clone()) * 0.5;
         let out_mid = f(&x_mid, &y)?;
         let out_ran = f(&x_ran, &y.mapv(|v| v.abs()))?;
 
         Ok(IBPTensor::new(
-            out_mid.clone() + (-out_ran.clone()),
+            out_mid.clone() - out_ran.clone(),
             out_mid + out_ran,
         ))
     } else {
