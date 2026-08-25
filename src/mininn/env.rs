@@ -1,17 +1,24 @@
 use std::{
     collections::BTreeMap,
-    ops::{Add, Mul, Neg},
+    ops::{Add, Mul, Neg, Sub},
 };
 
 use ndarray::ArrayD;
 
 use crate::{
-    interpreters::EvalError,
+    interpreters::{EvalError, concrete::eval_util::Tensor},
     mininn::{Atom, AtomKind, PaddingOptions, PoolOptions},
 };
 
 pub trait Value:
-    Add<Output = Self> + Mul<Output = Self> + Neg<Output = Self> + Sized + Clone + From<ArrayD<f64>>
+    Add<Output = Self>
+    + Sub<Output = Self>
+    + Mul<Output = Self>
+    + Neg<Output = Self>
+    + Sized
+    + Clone
+    + From<ArrayD<f64>>
+    + From<Tensor>
 {
     fn shape(&self) -> &[usize];
     fn ndim(&self) -> usize;

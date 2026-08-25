@@ -3,10 +3,17 @@ use ndarray::{ArrayD, Zip, arr0};
 use crate::{
     interpreters::{
         EvalError, Interpreter,
-        bounds::{abp_util::ABPTensor, ibp::IBPInterpreter, ibp_util::IBPTensor},
-        concrete::eval_util::Tensor,
+        bounds::{
+            abp_util::{ABPTensor, lbp_inner},
+            ibp::IBPInterpreter,
+            ibp_util::IBPTensor,
+        },
+        concrete::{
+            eval_util::Tensor,
+            grad::{GradInterpreter, unbroadcast},
+        },
     },
-    mininn::{Atom, ComputeGraph, Env, Primitive, Value},
+    mininn::{Atom, AtomKind, ComputeGraph, Env, Primitive, Value},
 };
 
 pub struct ABPInterpreter {}
@@ -57,27 +64,30 @@ impl ABPInterpreter {
             .map_collect(|&l, &u, &d| if (l >= 0.0) | (u <= 0.0) { 0.0 } else { d })
             .into();
 
-        let pos_w = out_w.mapv(|x| if x >= 0.0 { x } else { 0.0 });
-        let neg_w = out_w.mapv(|x| if x < 0.0 { x } else { 0.0 });
+        let pos_w = out_w.pos_part();
+        let neg_w = out_w.neg_part();
 
-        let un = upper_offset * neg_w.clone();
-
-        let axes: Vec<isize> = (0..un.ndim() as isize).collect();
         ABPTensor {
-            weights: lower_slope * pos_w + upper_slope * neg_w,
-            biases: un.reduce_sum(&axes),
+            weights: lower_slope * pos_w + upper_slope * neg_w.clone(),
+            biases: lbp_inner(&upper_offset, &neg_w),
         }
     }
 
     pub fn linear_lower_bound(
         graph: &ComputeGraph,
-        var_bounds: Env<IBPTensor>,
-        params: Env<Tensor>,
+        var_bounds: &Env<IBPTensor>,
+        params: &Env<Tensor>,
     ) -> Result<ABPTensor, EvalError> {
         // checks
         if graph.outvars.len() != 1 {
             return Err(EvalError::Eval(
                 "Affine Bound Propogation only supports nets with a single outvar.".to_string(),
+            ));
+        }
+
+        if graph.invars.len() != 1 {
+            return Err(EvalError::Eval(
+                "Affine Bound Propogation only supports nets with a single invar.".to_string(),
             ));
         }
 
@@ -89,57 +99,91 @@ impl ABPInterpreter {
             ));
         }
 
-        // actual start
         let mut weights = Env::new();
         weights.insert(
             outvar.name.clone(),
             Tensor::from(ArrayD::from_elem(outvar.shape.clone(), 1.0)),
         );
-        let b = |var: &Atom| var_bounds.resolve(var);
-        let w = |var: &Atom| weights.resolve(var);
-        let p = |var: &Atom| params.resolve(var);
+        let mut bias = Tensor::from(arr0(0.0).into_dyn());
 
-        let bias = Tensor::from(arr0(0.0).into_dyn());
+        // look-ups
+        {
+            let b = |var: &Atom| var_bounds.resolve(var);
+            let p = |var: &Atom| params.resolve(var);
 
-        for eqn in graph.equations.iter().rev() {
-            let aff = match eqn.primitive {
-                Primitive::Neg(atom) => todo!(),
-                Primitive::Reciprocal(atom) => todo!(),
-                Primitive::Square(atom) => todo!(),
-                Primitive::Sqrt(atom) => todo!(),
-                Primitive::Exp(atom) => todo!(),
-                Primitive::Log(atom) => todo!(),
-                Primitive::Add(atom, atom1) => todo!(),
-                Primitive::Mul(atom, atom1) => todo!(),
-                Primitive::Where(atom, atom1, atom2) => todo!(),
-                Primitive::Relu(atom) => {
-                    Self::crown_relu(&p(&eqn.outvar)?, &w(&eqn.outvar)?, &b(&atom)?)
+            for eqn in graph.equations.iter().rev() {
+                if weights.get(&eqn.outvar.name).is_none() {
+                    continue;
                 }
-                Primitive::LeakyRelu { operand, slope } => todo!(),
-                Primitive::Elu { operand, slope } => todo!(),
-                Primitive::Gelu(atom) => todo!(),
-                Primitive::NormalCdf(atom) => todo!(),
-                Primitive::Dot(atom, atom1) => todo!(),
-                Primitive::ReduceSum { operand, axes } => todo!(),
-                Primitive::ExpandDims { operand, axes } => todo!(),
-                Primitive::MoveAxis {
-                    operand,
-                    source,
-                    destination,
-                } => todo!(),
-                Primitive::Reshape { operand, new_shape } => todo!(),
-                Primitive::Pad { operand, options } => todo!(),
-                Primitive::Conv {
-                    input,
-                    kernel,
-                    options,
-                } => todo!(),
-                Primitive::AvgPool { operand, options } => todo!(),
-                Primitive::SumPool { operand, options } => todo!(),
-            };
+
+                // process primitive
+                let affs = match &eqn.primitive {
+                    Primitive::Neg(atom) => todo!(),
+                    Primitive::Reciprocal(atom) => todo!(),
+                    Primitive::Square(atom) => todo!(),
+                    Primitive::Sqrt(atom) => todo!(),
+                    Primitive::Exp(atom) => todo!(),
+                    Primitive::Log(atom) => todo!(),
+                    Primitive::Add(atom, atom1) => todo!(),
+                    Primitive::Mul(atom, atom1) => todo!(),
+                    Primitive::Where(atom, atom1, atom2) => todo!(),
+                    Primitive::Relu(atom) => {
+                        vec![Self::crown_relu(
+                            &p(&eqn.outvar)?,
+                            &weights.resolve(&eqn.outvar)?,
+                            &b(&atom)?,
+                        )]
+                    }
+                    Primitive::LeakyRelu { operand, slope } => todo!(),
+                    Primitive::Elu { operand, slope } => todo!(),
+                    Primitive::Gelu(atom) => todo!(),
+                    Primitive::NormalCdf(atom) => todo!(),
+                    Primitive::Dot(atom, atom1) => todo!(),
+                    Primitive::ReduceSum { operand, axes } => todo!(),
+                    Primitive::ExpandDims { operand, axes } => todo!(),
+                    Primitive::MoveAxis {
+                        operand,
+                        source,
+                        destination,
+                    } => todo!(),
+                    Primitive::Reshape { operand, new_shape } => todo!(),
+                    Primitive::Pad { operand, options } => todo!(),
+                    Primitive::Conv {
+                        input,
+                        kernel,
+                        options,
+                    } => todo!(),
+                    Primitive::AvgPool { operand, options } => todo!(),
+                    Primitive::SumPool { operand, options } => todo!(),
+                };
+
+                // accumulate / early concretize
+                for (invar, aff) in eqn.primitive.operands().iter().zip(affs) {
+                    let in_w = unbroadcast(aff.weights, &invar.shape);
+
+                    if let AtomKind::Const(val) = &invar.kind {
+                        let iw = val * &in_w;
+                        let axes: Vec<isize> = (0..iw.ndim() as isize).collect();
+                        bias = bias + iw.reduce_sum(&axes);
+                    } else if let Some(existing) = weights.get(&invar.name) {
+                        weights.update(&invar.name, existing.clone() + in_w);
+                    } else {
+                        weights.insert(invar.name.clone(), in_w);
+                    }
+                }
+            }
         }
 
-        todo!()
+        let invar = &graph.invars[0];
+        let invar_w = weights
+            .get(&invar.name)
+            .cloned()
+            .unwrap_or_else(|| ArrayD::zeros(ndarray::IxDyn(&invar.shape)).into());
+
+        Ok(ABPTensor {
+            weights: invar_w,
+            biases: bias,
+        })
     }
 }
 
@@ -201,6 +245,11 @@ impl Interpreter<IBPTensor> for ABPInterpreter {
         if params.len() > 0 {
             for _ in 0..ITERS {
                 // grad(loss(cg, ibp_bounds, params))
+                let alb = Self::linear_lower_bound(graph, &ibp_bounds, &params)?;
+                // let grads = GradInterpreter::run(
+                //     graph, // TODO incorrect
+                //     &vec![alb.concretize(&ibp_bounds.resolve(&graph.invars[0])?)],
+                // );
             }
         }
 

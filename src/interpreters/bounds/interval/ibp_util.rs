@@ -1,6 +1,6 @@
-use std::ops::{Add, Mul, Neg, Sub};
+use std::ops::{Add, Div, Mul, Neg, Sub};
 
-use ndarray::{ArrayD, ArrayView, Axis, Zip, arr0};
+use ndarray::{ArrayD, ArrayView, Axis, IxDyn, Zip, arr0, iter::Iter};
 
 use crate::{
     interpreters::{
@@ -29,6 +29,14 @@ impl IBPTensor {
     pub fn is_point(&self) -> bool {
         self.is_point
     }
+
+    pub fn sum(&self) -> IBPTensor {
+        IBPTensor::new(
+            arr0(self.lb.sum()).into_dyn().into(),
+            arr0(self.ub.sum()).into_dyn().into(),
+        )
+    }
+
 }
 
 impl Mul for IBPTensor {
@@ -123,6 +131,40 @@ impl Sub for &IBPTensor {
     }
 }
 
+impl Mul<f64> for IBPTensor {
+    type Output = IBPTensor;
+
+    fn mul(self, rhs: f64) -> IBPTensor {
+        if rhs >= 0.0 {
+            IBPTensor::new(self.lb * rhs, self.ub * rhs)
+        } else {
+            IBPTensor::new(self.ub * rhs, self.lb * rhs)
+        }
+    }
+}
+
+impl Div for IBPTensor {
+    type Output = IBPTensor;
+
+    // Valid when rhs ∌ 0 elementwise.
+    fn div(self, rhs: Self) -> IBPTensor {
+        let rhs_recip = IBPTensor::new(rhs.ub.mapv(f64::recip), rhs.lb.mapv(f64::recip));
+        self * rhs_recip
+    }
+}
+
+impl Div<f64> for IBPTensor {
+    type Output = IBPTensor;
+
+    fn div(self, rhs: f64) -> IBPTensor {
+        if rhs >= 0.0 {
+            IBPTensor::new(self.lb / rhs, self.ub / rhs)
+        } else {
+            IBPTensor::new(self.ub / rhs, self.lb / rhs)
+        }
+    }
+}
+
 impl From<f64> for IBPTensor {
     fn from(value: f64) -> Self {
         let t: Tensor = arr0(value).into_dyn().into();
@@ -134,6 +176,24 @@ impl From<ArrayD<f64>> for IBPTensor {
     fn from(value: ArrayD<f64>) -> Self {
         let t: Tensor = value.into();
         IBPTensor::new(t.clone(), t)
+    }
+}
+
+impl From<Tensor> for IBPTensor {
+    fn from(t: Tensor) -> Self {
+        IBPTensor::new(t.clone(), t)
+    }
+}
+
+impl<'a> IntoIterator for &'a IBPTensor {
+    type Item = (f64, f64);
+    type IntoIter = std::iter::Zip<
+        std::iter::Copied<Iter<'a, f64, IxDyn>>,
+        std::iter::Copied<Iter<'a, f64, IxDyn>>,
+    >;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.lb.iter().copied().zip(self.ub.iter().copied())
     }
 }
 
@@ -245,6 +305,14 @@ pub struct IBPBatchedTensor {
 impl IBPBatchedTensor {
     pub fn batch_size(&self) -> usize {
         self.lb.shape()[0]
+    }
+
+    pub fn sum(&self) -> IBPBatchedTensor {
+        let axes: Vec<isize> = (1..self.lb.ndim() as isize).collect();
+        IBPBatchedTensor {
+            lb: self.lb.reduce_sum(&axes),
+            ub: self.ub.reduce_sum(&axes),
+        }
     }
 
     pub fn get(&self, i: usize) -> IBPTensor {
@@ -462,9 +530,30 @@ impl Sub for &IBPBatchedTensor {
     }
 }
 
+impl Div<f64> for IBPBatchedTensor {
+    type Output = IBPBatchedTensor;
+
+    fn div(self, rhs: f64) -> IBPBatchedTensor {
+        if rhs >= 0.0 {
+            IBPBatchedTensor { lb: self.lb / rhs, ub: self.ub / rhs }
+        } else {
+            IBPBatchedTensor { lb: self.ub / rhs, ub: self.lb / rhs }
+        }
+    }
+}
+
 impl From<ArrayD<f64>> for IBPBatchedTensor {
     fn from(value: ArrayD<f64>) -> Self {
         let t: Tensor = value.into();
+        IBPBatchedTensor {
+            lb: t.clone(),
+            ub: t,
+        }
+    }
+}
+
+impl From<Tensor> for IBPBatchedTensor {
+    fn from(t: Tensor) -> Self {
         IBPBatchedTensor {
             lb: t.clone(),
             ub: t,

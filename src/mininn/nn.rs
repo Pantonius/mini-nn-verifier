@@ -1,13 +1,11 @@
 use std::fmt::Display;
 
-use ndarray::ArrayD;
-
-use crate::mininn::Layer;
+use crate::{interpreters::concrete::eval_util::Tensor, mininn::Layer};
 
 #[derive(Debug, Clone)]
 pub enum AtomKind {
     Var,
-    Const(ArrayD<f64>),
+    Const(Tensor),
 }
 
 #[derive(Debug, Clone)]
