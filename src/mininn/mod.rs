@@ -11,6 +11,9 @@ pub use mlp::*;
 mod parse;
 pub use parse::*;
 
+mod tracer;
+pub use tracer::*;
+
 #[derive(Debug, thiserror::Error)]
 pub enum MininnError {
     #[error("io error: {0}")]
