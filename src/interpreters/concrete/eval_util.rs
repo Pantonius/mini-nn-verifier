@@ -1,6 +1,9 @@
 use std::ops::{Add, Div, Index, Mul, Neg, Sub};
 
-use ndarray::{ArrayD, ArrayView, ArrayView1, ArrayView2, Axis, Ix0, Ix1, Ix2, IxDyn, IntoNdProducer, NdIndex, Zip, arr0, indices, linalg::Dot};
+use ndarray::{
+    ArrayD, ArrayView, ArrayView1, ArrayView2, Axis, IntoNdProducer, Ix0, Ix1, Ix2, IxDyn, NdIndex,
+    Zip, arr0, indices, linalg::Dot,
+};
 
 use crate::{
     interpreters::EvalError,
@@ -182,7 +185,11 @@ impl Tensor {
         self.inner
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = &f64> {
+    pub fn len(&self) -> usize {
+        self.inner.len()
+    }
+
+    pub fn iter(&self) -> ndarray::iter::Iter<'_, f64, IxDyn> {
         self.inner.iter()
     }
 
@@ -205,12 +212,49 @@ impl Tensor {
     pub fn mapv(&self, f: impl Fn(f64) -> f64) -> Self {
         self.inner.mapv(f).into()
     }
+
+    pub fn pos_part(&self) -> Self {
+        self.mapv(|x| if x >= 0.0 { x } else { 0.0 })
+    }
+
+    pub fn neg_part(&self) -> Self {
+        self.mapv(|x| if x < 0.0 { x } else { 0.0 })
+    }
+
+    pub fn sum(&self) -> f64 {
+        self.inner.sum()
+    }
+}
+
+impl IntoIterator for Tensor {
+    type Item = f64;
+    type IntoIter = ndarray::iter::IntoIter<f64, IxDyn>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.inner.into_iter()
+    }
+}
+
+impl<'a> IntoIterator for &'a Tensor {
+    type Item = &'a f64;
+    type IntoIter = ndarray::iter::Iter<'a, f64, IxDyn>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.inner.iter()
+    }
 }
 
 impl Mul<f64> for Tensor {
     type Output = Self;
     fn mul(self, rhs: f64) -> Self {
         self.inner.mapv(|x| x * rhs).into()
+    }
+}
+
+impl Div<f64> for Tensor {
+    type Output = Self;
+    fn div(self, rhs: f64) -> Self {
+        self.inner.mapv(|x| x / rhs).into()
     }
 }
 

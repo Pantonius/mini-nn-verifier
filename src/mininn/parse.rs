@@ -342,7 +342,8 @@ fn parse_atom<'a>(
             .ok_or_else(|| MininnError::Parse(format!("missing const data for {name}")))?;
         AtomKind::Const(
             ArrayD::from_shape_vec(IxDyn(&shape), decode_f64(bytes))
-                .map_err(|e| MininnError::Parse(format!("const shape mismatch: {e}")))?,
+                .map_err(|e| MininnError::Parse(format!("const shape mismatch: {e}")))?
+                .into(),
         )
     } else {
         AtomKind::Var

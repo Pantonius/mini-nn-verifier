@@ -13,7 +13,7 @@ use crate::{
 
 pub struct GradInterpreter;
 
-fn unbroadcast(g: Tensor, target: &[usize]) -> Tensor {
+pub fn unbroadcast(g: Tensor, target: &[usize]) -> Tensor {
     let mut arr = g.into_inner();
     while arr.ndim() > target.len() {
         arr = arr.sum_axis(Axis(0));
@@ -231,13 +231,12 @@ impl GradInterpreter {
             // shape manipulation
             ExpandDims { operand: _, axes } => {
                 let shape = tangent.shape().to_vec();
-                let arr = tangent.into_inner();
                 vec![EvalInterpreter::process_primitive(
                     &Primitive::ReduceSum {
                         operand: Atom {
                             name: String::new(),
                             shape,
-                            kind: AtomKind::Const(arr),
+                            kind: AtomKind::Const(tangent),
                         },
                         axes: axes.clone(),
                     },
@@ -250,13 +249,12 @@ impl GradInterpreter {
                 destination,
             } => {
                 let shape = tangent.shape().to_vec();
-                let arr = tangent.into_inner();
                 vec![EvalInterpreter::process_primitive(
                     &Primitive::MoveAxis {
                         operand: Atom {
                             name: String::new(),
                             shape,
-                            kind: AtomKind::Const(arr),
+                            kind: AtomKind::Const(tangent),
                         },
                         source: *destination,
                         destination: *source,
@@ -271,13 +269,12 @@ impl GradInterpreter {
                 let orig_shape: Vec<isize> =
                     p(operand)?.shape().iter().map(|&x| x as isize).collect();
                 let shape = tangent.shape().to_vec();
-                let arr = tangent.into_inner();
                 vec![EvalInterpreter::process_primitive(
                     &Primitive::Reshape {
                         operand: Atom {
                             name: String::new(),
                             shape,
-                            kind: AtomKind::Const(arr),
+                            kind: AtomKind::Const(tangent),
                         },
                         new_shape: orig_shape,
                     },
@@ -388,14 +385,16 @@ mod tests {
     use ndarray::{ArrayD, IxDyn};
 
     fn carr(data: &[f64], shape: &[usize]) -> Tensor {
-        ArrayD::from_shape_vec(IxDyn(shape), data.to_vec()).unwrap().into()
+        ArrayD::from_shape_vec(IxDyn(shape), data.to_vec())
+            .unwrap()
+            .into()
     }
 
     fn const_atom(data: &[f64], shape: &[usize]) -> Atom {
         Atom {
             name: String::new(),
             shape: shape.to_vec(),
-            kind: AtomKind::Const(carr(data, shape).into_inner()),
+            kind: AtomKind::Const(carr(data, shape)),
         }
     }
 
@@ -439,7 +438,6 @@ mod tests {
     fn num_vjp(x: &Tensor, tangent: &Tensor, f: impl Fn(&Tensor) -> Tensor) -> Tensor {
         let eps = 1e-5;
         let x_arr = x.view();
-        let tangent_arr = tangent.view();
         let x_flat: Vec<f64> = x_arr.iter().copied().collect();
         let grad_flat: Vec<f64> = (0..x_flat.len())
             .map(|i| {
@@ -449,10 +447,12 @@ mod tests {
                 xm[i] -= eps;
                 let fp = f(&ArrayD::from_shape_vec(x_arr.raw_dim(), xp).unwrap().into());
                 let fm = f(&ArrayD::from_shape_vec(x_arr.raw_dim(), xm).unwrap().into());
-                ((fp.view() - fm.view()) / (2.0 * eps) * tangent_arr).sum()
+                (&((fp - fm) / (2.0 * eps)) * tangent).sum()
             })
             .collect();
-        ArrayD::from_shape_vec(x_arr.raw_dim(), grad_flat).unwrap().into()
+        ArrayD::from_shape_vec(x_arr.raw_dim(), grad_flat)
+            .unwrap()
+            .into()
     }
 
     // ---- unary ----
