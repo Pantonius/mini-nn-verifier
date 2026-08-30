@@ -3,11 +3,8 @@ use std::ops::{Add, Div, Mul, Neg, Sub};
 use ndarray::{ArrayD, ArrayView, Axis, IxDyn, Zip, arr0, iter::Iter};
 
 use crate::{
-    interpreters::{
-        EvalError,
-        concrete::eval_util::{Tensor, binary, reshape_c},
-    },
-    mininn::{PaddingOptions, PoolOptions, Value},
+    interpreters::concrete::eval_util::{Tensor, binary, reshape_c},
+    mininn::{MininnError, PaddingOptions, PoolOptions, Value},
 };
 
 // ================================
@@ -210,7 +207,7 @@ impl Value for IBPTensor {
         self.lb.len()
     }
 
-    fn r#where(cond: &Self, x: &Self, y: &Self) -> Result<Self, EvalError> {
+    fn r#where(cond: &Self, x: &Self, y: &Self) -> Result<Self, MininnError> {
         ibp_where(cond, x, y)
     }
 
@@ -218,7 +215,7 @@ impl Value for IBPTensor {
         IBPTensor::new(self.lb.moveaxis(src, dst), self.ub.moveaxis(src, dst))
     }
 
-    fn dot(&self, b: &Self) -> Result<Self, EvalError> {
+    fn dot(&self, b: &Self) -> Result<Self, MininnError> {
         ibp_linear(|a, bv| a.dot(bv), self, b)
     }
 
@@ -242,22 +239,33 @@ impl Value for IBPTensor {
         IBPTensor::new(self.lb.expand_dims(axes), self.ub.expand_dims(axes))
     }
 
-    fn reshape(&self, new_shape: &[isize]) -> Result<Self, EvalError> {
+    fn reshape(&self, new_shape: &[isize]) -> Result<Self, MininnError> {
         Ok(IBPTensor::new(
             self.lb.reshape(new_shape)?,
             self.ub.reshape(new_shape)?,
         ))
     }
 
+    fn slice(&self, axis: isize, start: isize, end: Option<isize>, step: isize) -> Self {
+        IBPTensor::new(
+            self.lb.slice(axis, start, end, step),
+            self.ub.slice(axis, start, end, step),
+        )
+    }
+
     fn pad(&self, opt: &PaddingOptions) -> Self {
         IBPTensor::new(self.lb.pad(opt), self.ub.pad(opt))
     }
 
-    fn conv(&self, kernel: &Self, stride: isize) -> Result<Self, EvalError> {
+    fn conv(&self, kernel: &Self, stride: isize) -> Result<Self, MininnError> {
         ibp_linear(|a, b| a.conv(b, stride), self, kernel)
     }
 
-    fn pool(&self, opt: &PoolOptions, average: bool) -> Result<Self, EvalError> {
+    fn conv_kernel_grad(&self, input: &Self, stride: isize, kernel_shape: &[usize]) -> Result<Self, MininnError> {
+        ibp_linear(|g, inp| g.conv_kernel_grad(inp, stride, kernel_shape), self, input)
+    }
+
+    fn pool(&self, opt: &PoolOptions, average: bool) -> Result<Self, MininnError> {
         Ok(IBPTensor::new(
             self.lb.pool(opt, average)?,
             self.ub.pool(opt, average)?,
@@ -357,7 +365,7 @@ impl IBPBatchedTensor {
         a.moveaxis(src_b, dst_b)
     }
 
-    pub(crate) fn reshape_batched(a: &Tensor, new_shape: &[isize]) -> Result<Tensor, EvalError> {
+    pub(crate) fn reshape_batched(a: &Tensor, new_shape: &[isize]) -> Result<Tensor, MininnError> {
         let k = a.shape()[0] as isize;
         let mut batch_shape = vec![k];
         batch_shape.extend_from_slice(new_shape);
@@ -388,7 +396,7 @@ impl IBPBatchedTensor {
         input: &Tensor,
         kernel: &Tensor,
         stride: isize,
-    ) -> Result<Tensor, EvalError> {
+    ) -> Result<Tensor, MininnError> {
         let sh = input.shape().to_vec();
         let (k, n) = (sh[0], sh[1]);
         let flat = reshape_c(input, &[k * n, sh[2], sh[3], sh[4]]);
@@ -401,7 +409,7 @@ impl IBPBatchedTensor {
         a: &Tensor,
         opt: &PoolOptions,
         average: bool,
-    ) -> Result<Tensor, EvalError> {
+    ) -> Result<Tensor, MininnError> {
         if a.ndim() == 5 {
             let sh = a.shape().to_vec();
             let (k, n) = (sh[0], sh[1]);
@@ -542,6 +550,16 @@ impl Div<f64> for IBPBatchedTensor {
     }
 }
 
+impl From<f64> for IBPBatchedTensor {
+    fn from(value: f64) -> Self {
+        let t: Tensor = ArrayD::from_elem(IxDyn(&[]), value).into();
+        IBPBatchedTensor {
+            lb: t.clone(),
+            ub: t,
+        }
+    }
+}
+
 impl From<ArrayD<f64>> for IBPBatchedTensor {
     fn from(value: ArrayD<f64>) -> Self {
         let t: Tensor = value.into();
@@ -584,7 +602,7 @@ impl Value for IBPBatchedTensor {
         self.lb.len()
     }
 
-    fn r#where(cond: &Self, x: &Self, y: &Self) -> Result<Self, EvalError> {
+    fn r#where(cond: &Self, x: &Self, y: &Self) -> Result<Self, MininnError> {
         Ok(ibp_where(
             &IBPTensor::from(cond),
             &IBPTensor::from(x),
@@ -600,7 +618,7 @@ impl Value for IBPBatchedTensor {
         }
     }
 
-    fn dot(&self, b: &Self) -> Result<Self, EvalError> {
+    fn dot(&self, b: &Self) -> Result<Self, MininnError> {
         let a_t = IBPTensor::from(self);
         let b_t = IBPTensor::from(b);
         let result = if a_t.is_point() {
@@ -652,11 +670,19 @@ impl Value for IBPBatchedTensor {
         }
     }
 
-    fn reshape(&self, new_shape: &[isize]) -> Result<Self, EvalError> {
+    fn reshape(&self, new_shape: &[isize]) -> Result<Self, MininnError> {
         Ok(IBPBatchedTensor {
             lb: Self::reshape_batched(&self.lb, new_shape)?,
             ub: Self::reshape_batched(&self.ub, new_shape)?,
         })
+    }
+
+    fn slice(&self, axis: isize, start: isize, end: Option<isize>, step: isize) -> Self {
+        let axis_b = if axis >= 0 { axis + 1 } else { axis };
+        IBPBatchedTensor {
+            lb: self.lb.slice(axis_b, start, end, step),
+            ub: self.ub.slice(axis_b, start, end, step),
+        }
     }
 
     fn pad(&self, opt: &PaddingOptions) -> Self {
@@ -666,7 +692,7 @@ impl Value for IBPBatchedTensor {
         }
     }
 
-    fn conv(&self, kernel: &Self, stride: isize) -> Result<Self, EvalError> {
+    fn conv(&self, kernel: &Self, stride: isize) -> Result<Self, MininnError> {
         Ok(ibp_linear(
             |a, b| Self::conv_batched(a, b, stride),
             &IBPTensor::from(self),
@@ -675,7 +701,16 @@ impl Value for IBPBatchedTensor {
         .into())
     }
 
-    fn pool(&self, opt: &PoolOptions, average: bool) -> Result<Self, EvalError> {
+    fn conv_kernel_grad(&self, input: &Self, stride: isize, kernel_shape: &[usize]) -> Result<Self, MininnError> {
+        Ok(ibp_linear(
+            |g, inp| g.conv_kernel_grad(inp, stride, kernel_shape),
+            &IBPTensor::from(self),
+            &IBPTensor::from(input),
+        )?
+        .into())
+    }
+
+    fn pool(&self, opt: &PoolOptions, average: bool) -> Result<Self, MininnError> {
         Ok(IBPBatchedTensor {
             lb: Self::pool_batched(&self.lb, opt, average)?,
             ub: Self::pool_batched(&self.ub, opt, average)?,
@@ -780,7 +815,7 @@ pub(crate) fn ibp_where(
     condition: &IBPTensor,
     x: &IBPTensor,
     y: &IBPTensor,
-) -> Result<IBPTensor, EvalError> {
+) -> Result<IBPTensor, MininnError> {
     if condition.is_point() {
         let lb = Tensor::r#where(&condition.lb, &x.lb, &y.lb)?;
         let ub = Tensor::r#where(&condition.ub, &x.ub, &y.ub)?;
@@ -858,9 +893,9 @@ pub(crate) fn max4(a: &Tensor, b: &Tensor, c: &Tensor, d: &Tensor) -> Tensor {
         .into()
 }
 
-pub(crate) fn ibp_linear<F>(f: F, a: &IBPTensor, b: &IBPTensor) -> Result<IBPTensor, EvalError>
+pub(crate) fn ibp_linear<F>(f: F, a: &IBPTensor, b: &IBPTensor) -> Result<IBPTensor, MininnError>
 where
-    F: Fn(&Tensor, &Tensor) -> Result<Tensor, EvalError>,
+    F: Fn(&Tensor, &Tensor) -> Result<Tensor, MininnError>,
 {
     if a.is_point() {
         let x = a.lb.clone();

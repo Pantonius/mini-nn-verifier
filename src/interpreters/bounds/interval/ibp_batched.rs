@@ -36,8 +36,11 @@ impl IBPBatchedInterpreter {
             ExpandDims { operand, axes } => r(operand)?.expand_dims(axes),
             MoveAxis { operand, source, destination } => r(operand)?.moveaxis(*source, *destination),
             Reshape { operand, new_shape } => r(operand)?.reshape(new_shape)?,
+            Slice { operand, axis, start, end, step } => r(operand)?.slice(*axis, *start, *end, *step),
             Pad { operand, options } => r(operand)?.pad(options),
             Conv { input, kernel, options } => r(input)?.conv(&r(kernel)?, options.stride)?,
+            ConvKernelGrad { grad_out, input, options, kernel_shape } =>
+                r(grad_out)?.conv_kernel_grad(&r(input)?, options.stride, kernel_shape)?,
             AvgPool { operand, options } => r(operand)?.pool(options, true)?,
             SumPool { operand, options } => r(operand)?.pool(options, false)?,
         })

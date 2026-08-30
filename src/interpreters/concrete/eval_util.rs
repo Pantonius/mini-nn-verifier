@@ -5,10 +5,7 @@ use ndarray::{
     Zip, arr0, indices, linalg::Dot,
 };
 
-use crate::{
-    interpreters::EvalError,
-    mininn::{PaddingOptions, PoolOptions, Value},
-};
+use crate::mininn::{MininnError, PaddingOptions, PoolOptions, Value};
 
 /// Handles negative python style axis index and converts it into an absolute axis index
 pub fn norm_axis_index(axis: isize, ndim: usize) -> usize {
@@ -62,10 +59,10 @@ pub fn reshape_c(a: &Tensor, shape: &[usize]) -> Tensor {
 /// Elementwise binary op with numpy broadcasting.
 /// Given two tensors and a binary function (f64, f64) -> f64 returns a tensor on successful
 /// application
-pub fn binary(a: &Tensor, b: &Tensor, f: impl Fn(f64, f64) -> f64) -> Result<Tensor, EvalError> {
+pub fn binary(a: &Tensor, b: &Tensor, f: impl Fn(f64, f64) -> f64) -> Result<Tensor, MininnError> {
     // try to compute the broadcast shape
     let shape = broadcast_shape(a.shape(), b.shape()).ok_or_else(|| {
-        EvalError::Eval(format!(
+        MininnError::Parse(format!(
             "incompatible shapes {:?} and {:?}",
             a.shape(),
             b.shape()
@@ -76,12 +73,12 @@ pub fn binary(a: &Tensor, b: &Tensor, f: impl Fn(f64, f64) -> f64) -> Result<Ten
     let av = a
         .inner
         .broadcast(IxDyn(&shape))
-        .ok_or_else(|| EvalError::Eval("broadcast failed".to_string()))?;
+        .ok_or_else(|| MininnError::Parse("broadcast failed".to_string()))?;
 
     let bv = b
         .inner
         .broadcast(IxDyn(&shape))
-        .ok_or_else(|| EvalError::Eval("broadcast failed".to_string()))?;
+        .ok_or_else(|| MininnError::Parse("broadcast failed".to_string()))?;
 
     // zip and map elementwise via given binary function
     // NOTE panic is impossible since av and bv are of same shape
@@ -193,7 +190,7 @@ impl Tensor {
         self.inner.iter()
     }
 
-    pub fn view(&self) -> ArrayView<f64, IxDyn> {
+    pub fn view(&self) -> ArrayView<'_, f64, IxDyn> {
         self.inner.view()
     }
 
@@ -201,11 +198,11 @@ impl Tensor {
         self.inner.index_axis(axis, index).to_owned().into()
     }
 
-    pub fn as_1d(&self) -> ArrayView1<f64> {
+    pub fn as_1d(&self) -> ArrayView1<'_, f64> {
         self.inner.view().into_dimensionality::<Ix1>().unwrap()
     }
 
-    pub fn as_2d(&self) -> ArrayView2<f64> {
+    pub fn as_2d(&self) -> ArrayView2<'_, f64> {
         self.inner.view().into_dimensionality::<Ix2>().unwrap()
     }
 
@@ -265,6 +262,12 @@ impl Div<Tensor> for Tensor {
     }
 }
 
+impl From<f64> for Tensor {
+    fn from(value: f64) -> Self {
+        ArrayD::from_elem(IxDyn(&[]), value).into()
+    }
+}
+
 impl From<ArrayD<f64>> for Tensor {
     fn from(value: ArrayD<f64>) -> Self {
         Self { inner: value }
@@ -285,27 +288,27 @@ impl Value for Tensor {
     }
 
     /// numpy.where(cond, x, y) with broadcasting; `cond` is truthy when non-zero.
-    fn r#where(cond: &Self, x: &Self, y: &Self) -> Result<Self, EvalError> {
+    fn r#where(cond: &Self, x: &Self, y: &Self) -> Result<Self, MininnError> {
         // compute broadcasted shape for cond and x, then for that s and y
         let s = broadcast_shape(cond.shape(), x.shape())
             .and_then(|s| broadcast_shape(&s, y.shape()))
-            .ok_or_else(|| EvalError::Eval("where: incompatible shapes".to_string()))?;
+            .ok_or_else(|| MininnError::Parse("where: incompatible shapes".to_string()))?;
 
         // then actually broadcast each to that shape
         let cv = cond
             .inner
             .broadcast(IxDyn(&s))
-            .ok_or_else(|| EvalError::Eval("broadcast failed".to_string()))?;
+            .ok_or_else(|| MininnError::Parse("broadcast failed".to_string()))?;
 
         let xv = x
             .inner
             .broadcast(IxDyn(&s))
-            .ok_or_else(|| EvalError::Eval("broadcast failed".to_string()))?;
+            .ok_or_else(|| MininnError::Parse("broadcast failed".to_string()))?;
 
         let yv = y
             .inner
             .broadcast(IxDyn(&s))
-            .ok_or_else(|| EvalError::Eval("broadcast failed".to_string()))?;
+            .ok_or_else(|| MininnError::Parse("broadcast failed".to_string()))?;
 
         // zip cv, xv, yv into a triple and apply the condition logic elementwise
         // NOTE panic is impossible since cv, xv, yv are of same shape
@@ -344,7 +347,7 @@ impl Value for Tensor {
     /// numpy.dot: contract the last axis of `a` with the second-to-last of `b`
     /// (or the only axis of `b` when it is 1-D).
     /// numpy.org/doc/stable/reference/generated/numpy.dot.html
-    fn dot(&self, b: &Self) -> Result<Self, EvalError> {
+    fn dot(&self, b: &Self) -> Result<Self, MininnError> {
         // shapes of each input
         let (ash, bsh) = (self.shape().to_vec(), b.shape().to_vec());
 
@@ -376,7 +379,7 @@ impl Value for Tensor {
             // that we can delegate to the implement dot product
             if ash.len() == 1 {
                 if ash[0] != bsh[0] {
-                    return Err(EvalError::Eval(format!(
+                    return Err(MininnError::Parse(format!(
                         "dot: {ash:?} · {bsh:?} axis mismatch"
                     )));
                 }
@@ -396,7 +399,7 @@ impl Value for Tensor {
                 return Ok(arr0(a2.dot(&b2)).into_dyn().into());
             } else {
                 if ash[1] != bsh[0] {
-                    return Err(EvalError::Eval(format!(
+                    return Err(MininnError::Parse(format!(
                         "dot: {ash:?} · {bsh:?} axis mismatch"
                     )));
                 }
@@ -434,7 +437,7 @@ impl Value for Tensor {
         // If a is an N-D array and b is a 1-D array, it is a sum product over the last axis of a and b.
         if bsh.len() == 1 {
             if bsh[0] != k {
-                return Err(EvalError::Eval(format!(
+                return Err(MininnError::Parse(format!(
                     "dot: {ash:?} · {bsh:?} axis mismatch"
                 )));
             }
@@ -445,7 +448,7 @@ impl Value for Tensor {
 
         // If a is an N-D array and b is an M-D array (where M>=2), it is a sum product over the last axis of a and the second-to-last axis of b:
         if bsh[bsh.len() - 2] != k {
-            return Err(EvalError::Eval(format!(
+            return Err(MininnError::Parse(format!(
                 "dot: {ash:?} · {bsh:?} axis mismatch"
             )));
         }
@@ -500,7 +503,7 @@ impl Value for Tensor {
     }
 
     /// Reshape resolving a single inferred dimensions (specified by -1).
-    fn reshape(&self, new_shape: &[isize]) -> Result<Self, EvalError> {
+    fn reshape(&self, new_shape: &[isize]) -> Result<Self, MininnError> {
         let known_dims: usize = new_shape
             .iter()
             .filter(|&&d| d >= 0)
@@ -524,13 +527,21 @@ impl Value for Tensor {
             .collect();
 
         if shape.iter().product::<usize>() != self.len() {
-            return Err(EvalError::Eval(format!(
+            return Err(MininnError::Parse(format!(
                 "reshape {:?} -> {new_shape:?} changes element count",
                 self.shape()
             )));
         }
 
         Ok(reshape_c(self, &shape))
+    }
+
+    fn slice(&self, axis: isize, start: isize, end: Option<isize>, step: isize) -> Self {
+        let ax = norm_axis_index(axis, self.ndim());
+        self.inner
+            .slice_axis(Axis(ax), ndarray::Slice::new(start, end, step))
+            .to_owned()
+            .into()
     }
 
     /// jax.lax.pad: per listed axis, add `left`/`right` padding and `interior`
@@ -570,10 +581,49 @@ impl Value for Tensor {
         out.into()
     }
 
+    fn conv_kernel_grad(
+        &self,
+        input: &Self,
+        stride: isize,
+        kernel_shape: &[usize],
+    ) -> Result<Self, MininnError> {
+        let s = stride as usize;
+        let (oc, ic, kh, kw) = (
+            kernel_shape[0],
+            kernel_shape[1],
+            kernel_shape[2],
+            kernel_shape[3],
+        );
+        let n = self.shape()[0];
+        let oh = self.shape()[2];
+        let ow = self.shape()[3];
+        let mut d_kernel = ArrayD::zeros(IxDyn(kernel_shape));
+        let g = self.inner.view();
+        let inp = input.inner.view();
+        for ni in 0..n {
+            for oci in 0..oc {
+                for hi in 0..oh {
+                    for wi in 0..ow {
+                        let t = g[[ni, oci, hi, wi]];
+                        for ici in 0..ic {
+                            for khi in 0..kh {
+                                for kwi in 0..kw {
+                                    d_kernel[[oci, ici, khi, kwi]] +=
+                                        t * inp[[ni, ici, hi * s + khi, wi * s + kwi]];
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Ok(d_kernel.into())
+    }
+
     /// 2-D cross-correlation (NCHW input, OIHW kernel), single stride for H and W.
-    fn conv(&self, kernel: &Self, stride: isize) -> Result<Self, EvalError> {
+    fn conv(&self, kernel: &Self, stride: isize) -> Result<Self, MininnError> {
         if self.ndim() != 4 || kernel.ndim() != 4 {
-            return Err(EvalError::Eval(
+            return Err(MininnError::Parse(
                 "conv expects 4-D self and kernel".to_string(),
             ));
         }
@@ -593,7 +643,7 @@ impl Value for Tensor {
         );
 
         if kc != c {
-            return Err(EvalError::Eval(format!(
+            return Err(MininnError::Parse(format!(
                 "conv channel mismatch: input {c}, kernel {kc}"
             )));
         }
@@ -628,9 +678,9 @@ impl Value for Tensor {
     }
 
     /// Windowed sum/average pooling over every axis (per-axis window and stride).
-    fn pool(&self, opt: &PoolOptions, average: bool) -> Result<Self, EvalError> {
+    fn pool(&self, opt: &PoolOptions, average: bool) -> Result<Self, MininnError> {
         if opt.window_size.len() != self.ndim() || opt.stride.len() != self.ndim() {
-            return Err(EvalError::Eval(
+            return Err(MininnError::Parse(
                 "pool: window/stride rank must match input".to_string(),
             ));
         }

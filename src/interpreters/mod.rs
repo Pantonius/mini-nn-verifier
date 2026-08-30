@@ -1,4 +1,5 @@
 pub mod bounds;
+pub mod compute_graph;
 pub mod concrete;
 
 use crate::mininn::{ComputeGraph, MininnError, Value};

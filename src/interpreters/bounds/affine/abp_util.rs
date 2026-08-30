@@ -1,9 +1,7 @@
-use std::ops::{Add, Mul};
+use crate::mininn::Value;
 
-use crate::{interpreters::{bounds::ibp_util::IBPTensor, concrete::eval_util::Tensor}, mininn::Value};
-
-pub fn lbp_inner(w: &Tensor, x: &Tensor) -> Tensor {
-    let product = w * x;
+pub fn lbp_inner<T: Value>(w: &T, x: &T) -> T {
+    let product = w.clone() * x.clone();
     let axes: Vec<isize> = (0..product.ndim() as isize).collect();
     product.reduce_sum(&axes)
 }
@@ -12,40 +10,16 @@ pub fn lbp_inner(w: &Tensor, x: &Tensor) -> Tensor {
 // ABPTensor (Affine Bounds)
 // ================================
 #[derive(Debug, Clone)]
-pub struct ABPTensor {
-    pub weights: Tensor,
-    pub biases: Tensor,
+pub struct ABPTensor<T: Value> {
+    pub weights: T,
+    pub biases: T,
 }
 
-impl ABPTensor {
-    pub fn concretize(&self, in_bounds: &IBPTensor) -> Tensor {
-        self.biases.clone() + lbp_inner(&self.weights.pos_part(), &in_bounds.lb) + lbp_inner(&self.weights.neg_part(), &in_bounds.ub)
+impl<T: Value> ABPTensor<T> {
+    /// Concretize the affine bound given concrete lower/upper bounds on the input.
+    pub fn concretize(&self, lb: &T, ub: &T) -> T {
+        let pos_w = self.weights.relu();
+        let neg_w = self.weights.clone() - pos_w.clone();
+        self.biases.clone() + lbp_inner(&pos_w, lb) + lbp_inner(&neg_w, ub)
     }
 }
-
-impl Mul for ABPTensor {
-    type Output = Self;
-
-    fn mul(self, rhs: Self) -> Self::Output {
-        Self {
-            todo!()
-        }
-    }
-}
-
-impl Add for ABPTensor {
-    type Output = Self;
-
-    fn add(self, rhs: Self) -> Self::Output {
-        Self {
-            weights: self.weights + rhs.weights,
-            biases: self.biases + rhs.biases,
-        }
-    }
-}
-
-impl Value for ABPTensor {}
-
-// ================================
-// TODO ABPTensor Batched
-// ================================

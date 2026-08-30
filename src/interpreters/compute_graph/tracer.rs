@@ -4,17 +4,21 @@ use std::{
     rc::Rc,
 };
 
-use ndarray::ArrayD;
+use ndarray::{ArrayD, IxDyn};
 
 use crate::{
-    interpreters::concrete::eval_util::Tensor,
-    mininn::{Atom, AtomKind, ComputeGraph, ConvOptions, Equation, Primitive, Value},
+    interpreters::concrete::eval_util::{Tensor, broadcast_shape},
+    mininn::{
+        Atom, AtomKind, ComputeGraph, ConvOptions, Equation, MininnError, PaddingOptions,
+        PoolOptions, Primitive, Value,
+    },
 };
 
 #[derive(Debug, Clone)]
 pub struct ComputeGraphBuilder {
     n_atoms: usize,
     equations: Vec<Equation>,
+    invars: Vec<Atom>,
 }
 
 impl ComputeGraphBuilder {
@@ -22,7 +26,18 @@ impl ComputeGraphBuilder {
         ComputeGraphBuilder {
             n_atoms: 0,
             equations: Vec::new(),
+            invars: Vec::new(),
         }
+    }
+
+    pub fn register_invar(&mut self, name: String, shape: Vec<usize>) -> Atom {
+        let atom = Atom {
+            name,
+            shape,
+            kind: AtomKind::Var,
+        };
+        self.invars.push(atom.clone());
+        atom
     }
 
     pub fn build_equation(&mut self, primitive: Primitive, shape: Vec<usize>) -> Atom {
@@ -37,29 +52,30 @@ impl ComputeGraphBuilder {
         res
     }
 
-    pub fn build(self) -> ComputeGraph {
-        assert_ne!(self.equations.len(), 0);
-
-        let invars = self.equations[0]
-            .primitive
-            .operands()
-            .iter()
-            .map(|&a| a.clone())
-            .collect();
-        let outvars = self
-            .equations
-            .last()
-            .unwrap()
-            .primitive
-            .operands()
-            .iter()
-            .map(|&a| a.clone())
-            .collect();
-
+    pub fn build(self, outvar: Atom) -> ComputeGraph {
         ComputeGraph {
-            invars,
-            outvars,
+            invars: self.invars,
+            outvars: vec![outvar],
             equations: self.equations,
+        }
+    }
+}
+
+impl From<ComputeGraph> for ComputeGraphBuilder {
+    fn from(graph: ComputeGraph) -> Self {
+        // Continue the `a{n}` counter past any existing generated names so freshly
+        // built equations can't collide with atoms already in the graph.
+        let max_gen = graph
+            .invars
+            .iter()
+            .map(|a| &a.name)
+            .chain(graph.equations.iter().map(|e| &e.outvar.name))
+            .filter_map(|name| name.strip_prefix('a').and_then(|n| n.parse::<usize>().ok()))
+            .max();
+        ComputeGraphBuilder {
+            n_atoms: max_gen.map_or(0, |n| n + 1),
+            equations: graph.equations,
+            invars: graph.invars,
         }
     }
 }
@@ -78,6 +94,10 @@ impl Tracer {
         }
     }
 
+    pub fn atom(&self) -> &Atom {
+        &self.atom
+    }
+
     fn pick_builder(
         self_b: Option<Rc<RefCell<ComputeGraphBuilder>>>,
         rhs_b: Option<Rc<RefCell<ComputeGraphBuilder>>>,
@@ -87,15 +107,24 @@ impl Tracer {
             .expect("at least one operand must be a Var tracer")
     }
 
-    fn emit_unary(&self, primitive: Primitive, out_shape: Vec<usize>) -> Self {
-        let builder = self
-            .builder
-            .clone()
-            .expect("cannot trace a unary op on a Const tracer");
-        let outvar = builder.borrow_mut().build_equation(primitive, out_shape);
-        Self {
-            atom: outvar,
-            builder: Some(builder),
+    fn emit_unary(
+        &self,
+        primitive: Primitive,
+        out_shape: Vec<usize>,
+        fallback: impl FnOnce(&Tensor) -> Tensor,
+    ) -> Self {
+        if let Some(builder) = &self.builder {
+            let builder = builder.clone();
+            let outvar = builder.borrow_mut().build_equation(primitive, out_shape);
+            Self {
+                atom: outvar,
+                builder: Some(builder),
+            }
+        } else {
+            let AtomKind::Const(t) = &self.atom.kind else {
+                panic!("Var tracer without builder")
+            };
+            Self::from(fallback(t))
         }
     }
 }
@@ -104,7 +133,13 @@ impl Add for Tracer {
     type Output = Self;
 
     fn add(self, rhs: Self) -> Self::Output {
-        let shape = self.atom.shape.clone();
+        if self.builder.is_none() && rhs.builder.is_none() {
+            if let (AtomKind::Const(lt), AtomKind::Const(rt)) = (&self.atom.kind, &rhs.atom.kind) {
+                return Self::from(lt.clone() + rt.clone());
+            }
+        }
+        let shape = broadcast_shape(&self.atom.shape, &rhs.atom.shape)
+            .expect("Tracer::add: shapes not broadcastable");
         let builder = Self::pick_builder(self.builder, rhs.builder);
         let prim = Primitive::Add(self.atom, rhs.atom);
         let outvar = builder.borrow_mut().build_equation(prim, shape);
@@ -119,7 +154,13 @@ impl Mul for Tracer {
     type Output = Self;
 
     fn mul(self, rhs: Self) -> Self::Output {
-        let shape = self.atom.shape.clone();
+        if self.builder.is_none() && rhs.builder.is_none() {
+            if let (AtomKind::Const(lt), AtomKind::Const(rt)) = (&self.atom.kind, &rhs.atom.kind) {
+                return Self::from(lt.clone() * rt.clone());
+            }
+        }
+        let shape = broadcast_shape(&self.atom.shape, &rhs.atom.shape)
+            .expect("Tracer::mul: shapes not broadcastable");
         let builder = Self::pick_builder(self.builder, rhs.builder);
         let prim = Primitive::Mul(self.atom, rhs.atom);
         let outvar = builder.borrow_mut().build_equation(prim, shape);
@@ -145,6 +186,12 @@ impl From<Tensor> for Tracer {
     }
 }
 
+impl From<f64> for Tracer {
+    fn from(value: f64) -> Self {
+        Self::from(ArrayD::from_elem(IxDyn(&[]), value))
+    }
+}
+
 impl From<ArrayD<f64>> for Tracer {
     fn from(value: ArrayD<f64>) -> Self {
         let tensor = Tensor::from(value);
@@ -164,8 +211,11 @@ impl Neg for Tracer {
     type Output = Self;
 
     fn neg(self) -> Self::Output {
+        if let (AtomKind::Const(t), None) = (&self.atom.kind, &self.builder) {
+            return Self::from(-t.clone());
+        }
         let shape = self.atom.shape.clone();
-        let builder = self.builder.expect("cannot negate a Const tracer");
+        let builder = self.builder.expect("Var tracer missing builder");
         let prim = Primitive::Neg(self.atom);
         let outvar = builder.borrow_mut().build_equation(prim, shape);
         Self {
@@ -188,7 +238,7 @@ impl Value for Tracer {
         self.atom.shape.iter().product()
     }
 
-    fn r#where(cond: &Self, x: &Self, y: &Self) -> Result<Self, crate::interpreters::EvalError> {
+    fn r#where(cond: &Self, x: &Self, y: &Self) -> Result<Self, MininnError> {
         let builder = cond
             .builder
             .clone()
@@ -226,17 +276,34 @@ impl Value for Tracer {
                 destination: dst,
             },
             out_shape,
+            move |t| t.moveaxis(src, dst),
         )
     }
 
-    fn dot(&self, b: &Self) -> Result<Self, crate::interpreters::EvalError> {
-        // [..., M, K] · [..., K, N] → [..., M, N]
-        let ndim = self.atom.shape.len();
-        let mut out_shape = self.atom.shape[..ndim - 1].to_vec();
-        out_shape.push(*b.atom.shape.last().expect("dot: rhs must be at least 1-D"));
+    fn dot(&self, b: &Self) -> Result<Self, MininnError> {
+        if self.builder.is_none() && b.builder.is_none() {
+            if let (AtomKind::Const(lt), AtomKind::Const(rt)) = (&self.atom.kind, &b.atom.kind) {
+                return lt.dot(rt).map(Self::from);
+            }
+        }
+
+        let (ash, bsh) = (&self.atom.shape, &b.atom.shape);
+
+        let out_shape: Vec<usize> = if ash.is_empty() || bsh.is_empty() {
+            broadcast_shape(ash, bsh).expect("dot: scalar operand not broadcastable")
+        } else if bsh.len() == 1 {
+            ash[..ash.len() - 1].to_vec()
+        } else {
+            let mut s = ash[..ash.len() - 1].to_vec();
+            s.extend_from_slice(&bsh[..bsh.len() - 2]);
+            s.push(bsh[bsh.len() - 1]);
+            s
+        };
+
         let builder = Self::pick_builder(self.builder.clone(), b.builder.clone());
         let prim = Primitive::Dot(self.atom.clone(), b.atom.clone());
         let outvar = builder.borrow_mut().build_equation(prim, out_shape);
+
         Ok(Self {
             atom: outvar,
             builder: Some(builder),
@@ -247,17 +314,23 @@ impl Value for Tracer {
         self.emit_unary(
             Primitive::Square(self.atom.clone()),
             self.atom.shape.clone(),
+            |t| t.square(),
         )
     }
 
     fn sqrt(&self) -> Self {
-        self.emit_unary(Primitive::Sqrt(self.atom.clone()), self.atom.shape.clone())
+        self.emit_unary(
+            Primitive::Sqrt(self.atom.clone()),
+            self.atom.shape.clone(),
+            |t| t.sqrt(),
+        )
     }
 
     fn reciprocal(&self) -> Self {
         self.emit_unary(
             Primitive::Reciprocal(self.atom.clone()),
             self.atom.shape.clone(),
+            |t| t.reciprocal(),
         )
     }
 
@@ -287,6 +360,7 @@ impl Value for Tracer {
                 axes: axes.to_vec(),
             },
             out_shape,
+            |t| t.reduce_sum(axes),
         )
     }
 
@@ -318,10 +392,11 @@ impl Value for Tracer {
                 axes: axes.to_vec(),
             },
             out_shape,
+            |t| t.expand_dims(axes),
         )
     }
 
-    fn reshape(&self, new_shape: &[isize]) -> Result<Self, crate::interpreters::EvalError> {
+    fn reshape(&self, new_shape: &[isize]) -> Result<Self, MininnError> {
         let total: usize = self.atom.shape.iter().product();
         let known: usize = new_shape
             .iter()
@@ -338,10 +413,59 @@ impl Value for Tracer {
                 new_shape: new_shape.to_vec(),
             },
             out_shape,
+            |t| t.reshape(new_shape).unwrap(),
         ))
     }
 
-    fn pad(&self, opt: &super::PaddingOptions) -> Self {
+    fn slice(&self, axis: isize, start: isize, end: Option<isize>, step: isize) -> Self {
+        let ndim = self.atom.shape.len();
+        let ax = if axis < 0 {
+            (axis + ndim as isize) as usize
+        } else {
+            axis as usize
+        };
+        let size = self.atom.shape[ax] as isize;
+
+        let start_n = if start >= 0 {
+            start.min(size)
+        } else {
+            (start + size).max(0)
+        };
+        let end_n = match end {
+            Some(e) if e >= 0 => e.min(size),
+            Some(e) => (e + size).max(0),
+            None => {
+                if step > 0 {
+                    size
+                } else {
+                    -1
+                }
+            }
+        };
+        let out_ax = if step > 0 {
+            let diff = (end_n - start_n).max(0) as usize;
+            (diff + step as usize - 1) / step as usize
+        } else {
+            let diff = (start_n - end_n).max(0) as usize;
+            (diff + (-step) as usize - 1) / (-step) as usize
+        };
+
+        let mut out_shape = self.atom.shape.clone();
+        out_shape[ax] = out_ax;
+        self.emit_unary(
+            Primitive::Slice {
+                operand: self.atom.clone(),
+                axis,
+                start,
+                end,
+                step,
+            },
+            out_shape,
+            move |t| t.slice(axis, start, end, step),
+        )
+    }
+
+    fn pad(&self, opt: &PaddingOptions) -> Self {
         let ndim = self.atom.shape.len() as isize;
         let padded: std::collections::HashSet<usize> = opt
             .axes
@@ -375,10 +499,33 @@ impl Value for Tracer {
                 options: opt.clone(),
             },
             out_shape,
+            |t| t.pad(opt),
         )
     }
 
-    fn conv(&self, kernel: &Self, stride: isize) -> Result<Self, crate::interpreters::EvalError> {
+    fn conv_kernel_grad(
+        &self,
+        input: &Self,
+        stride: isize,
+        kernel_shape: &[usize],
+    ) -> Result<Self, MininnError> {
+        let builder = Self::pick_builder(self.builder.clone(), input.builder.clone());
+        let prim = Primitive::ConvKernelGrad {
+            grad_out: self.atom.clone(),
+            input: input.atom.clone(),
+            options: ConvOptions { stride },
+            kernel_shape: kernel_shape.to_vec(),
+        };
+        let outvar = builder
+            .borrow_mut()
+            .build_equation(prim, kernel_shape.to_vec());
+        Ok(Self {
+            atom: outvar,
+            builder: Some(builder),
+        })
+    }
+
+    fn conv(&self, kernel: &Self, stride: isize) -> Result<Self, MininnError> {
         // input: [N, C_in, H, W], kernel: [C_out, C_in, kH, kW] → [N, C_out, H_out, W_out]
         let s = stride as usize;
         let out_shape = vec![
@@ -400,11 +547,7 @@ impl Value for Tracer {
         })
     }
 
-    fn pool(
-        &self,
-        opt: &super::PoolOptions,
-        average: bool,
-    ) -> Result<Self, crate::interpreters::EvalError> {
+    fn pool(&self, opt: &PoolOptions, average: bool) -> Result<Self, MininnError> {
         let spatial = self.atom.shape.len() - opt.window_size.len();
         let out_shape: Vec<usize> = self
             .atom
@@ -430,19 +573,31 @@ impl Value for Tracer {
                 options: opt.clone(),
             }
         };
-        Ok(self.emit_unary(prim, out_shape))
+        Ok(self.emit_unary(prim, out_shape, |t| t.pool(opt, average).unwrap()))
     }
 
     fn exp(&self) -> Self {
-        self.emit_unary(Primitive::Exp(self.atom.clone()), self.atom.shape.clone())
+        self.emit_unary(
+            Primitive::Exp(self.atom.clone()),
+            self.atom.shape.clone(),
+            |t| t.exp(),
+        )
     }
 
     fn log(&self) -> Self {
-        self.emit_unary(Primitive::Log(self.atom.clone()), self.atom.shape.clone())
+        self.emit_unary(
+            Primitive::Log(self.atom.clone()),
+            self.atom.shape.clone(),
+            |t| t.log(),
+        )
     }
 
     fn relu(&self) -> Self {
-        self.emit_unary(Primitive::Relu(self.atom.clone()), self.atom.shape.clone())
+        self.emit_unary(
+            Primitive::Relu(self.atom.clone()),
+            self.atom.shape.clone(),
+            |t| t.relu(),
+        )
     }
 
     fn leaky_relu(&self, slope: f64) -> Self {
@@ -452,6 +607,7 @@ impl Value for Tracer {
                 slope,
             },
             self.atom.shape.clone(),
+            move |t| t.leaky_relu(slope),
         )
     }
 
@@ -462,6 +618,7 @@ impl Value for Tracer {
                 slope,
             },
             self.atom.shape.clone(),
+            move |t| t.elu(slope),
         )
     }
 
@@ -469,10 +626,15 @@ impl Value for Tracer {
         self.emit_unary(
             Primitive::NormalCdf(self.atom.clone()),
             self.atom.shape.clone(),
+            |t| t.normcdf(),
         )
     }
 
     fn gelu(&self) -> Self {
-        self.emit_unary(Primitive::Gelu(self.atom.clone()), self.atom.shape.clone())
+        self.emit_unary(
+            Primitive::Gelu(self.atom.clone()),
+            self.atom.shape.clone(),
+            |t| t.gelu(),
+        )
     }
 }

@@ -50,6 +50,8 @@ impl EvalInterpreter {
                 destination,
             } => r(operand)?.moveaxis(*source, *destination),
             Reshape { operand, new_shape } => r(operand)?.reshape(&new_shape)?,
+            // slicing
+            Slice { operand, axis, start, end, step } => r(operand)?.slice(*axis, *start, *end, *step),
             // padding
             Pad { operand, options } => r(operand)?.pad(options),
             // 2d convolution
@@ -58,6 +60,8 @@ impl EvalInterpreter {
                 kernel,
                 options,
             } => r(&input)?.conv(&r(&kernel)?, options.stride)?,
+            ConvKernelGrad { grad_out, input, options, kernel_shape } =>
+                r(grad_out)?.conv_kernel_grad(&r(input)?, options.stride, kernel_shape)?,
             // pooling
             AvgPool { operand, options } => r(operand)?.pool(options, true)?,
             SumPool { operand, options } => r(operand)?.pool(options, false)?,

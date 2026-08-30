@@ -113,6 +113,14 @@ pub enum Primitive {
         operand: Atom,
         new_shape: Vec<isize>,
     },
+    // strided slice: y = x[start:end:step] along a single axis
+    Slice {
+        operand: Atom,
+        axis: isize,
+        start: isize,
+        end: Option<isize>,
+        step: isize,
+    },
     // padding
     Pad {
         operand: Atom,
@@ -123,6 +131,13 @@ pub enum Primitive {
         input: Atom,
         kernel: Atom,
         options: ConvOptions,
+    },
+    // gradient of conv w.r.t. kernel: conv_kernel_grad(grad_out, input)
+    ConvKernelGrad {
+        grad_out: Atom,
+        input: Atom,
+        options: ConvOptions,
+        kernel_shape: Vec<usize>,
     },
     // average pooling
     AvgPool {
@@ -160,8 +175,10 @@ impl Primitive {
             ExpandDims { .. } => "expand_dims",
             MoveAxis { .. } => "moveaxis",
             Reshape { .. } => "reshape",
+            Slice { .. } => "slice",
             Pad { .. } => "pad",
             Conv { .. } => "conv",
+            ConvKernelGrad { .. } => "conv_kernel_grad",
             AvgPool { .. } => "avgpool",
             SumPool { .. } => "sumpool",
         }
@@ -180,10 +197,14 @@ impl Primitive {
             | MoveAxis { operand, .. }
             | Reshape { operand, .. }
             | Pad { operand, .. }
+            | Slice { operand, .. }
             | AvgPool { operand, .. }
             | SumPool { operand, .. } => vec![operand],
             Add(a, b) | Mul(a, b) | Dot(a, b) => vec![a, b],
             Conv { input, kernel, .. } => vec![input, kernel],
+            ConvKernelGrad {
+                grad_out, input, ..
+            } => vec![grad_out, input],
             Where(c, x, y) => vec![c, x, y],
         }
     }
