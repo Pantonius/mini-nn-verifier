@@ -7,7 +7,7 @@ use ndarray::ArrayD;
 
 use crate::{
     interpreters::{EvalError, concrete::eval_util::Tensor},
-    mininn::{Atom, AtomKind, PaddingOptions, PoolOptions},
+    mininn::{Atom, AtomKind, MininnError, PaddingOptions, PoolOptions},
 };
 
 pub trait Value:
@@ -19,23 +19,26 @@ pub trait Value:
     + Clone
     + From<ArrayD<f64>>
     + From<Tensor>
+    + From<f64>
 {
     fn shape(&self) -> &[usize];
     fn ndim(&self) -> usize;
     fn len(&self) -> usize;
 
-    fn r#where(cond: &Self, x: &Self, y: &Self) -> Result<Self, EvalError>;
+    fn r#where(cond: &Self, x: &Self, y: &Self) -> Result<Self, MininnError>;
     fn moveaxis(&self, src: isize, dst: isize) -> Self;
-    fn dot(&self, b: &Self) -> Result<Self, EvalError>;
+    fn dot(&self, b: &Self) -> Result<Self, MininnError>;
     fn square(&self) -> Self;
     fn sqrt(&self) -> Self;
     fn reciprocal(&self) -> Self;
     fn reduce_sum(&self, axes: &[isize]) -> Self;
     fn expand_dims(&self, axes: &[isize]) -> Self;
-    fn reshape(&self, new_shape: &[isize]) -> Result<Self, EvalError>;
+    fn reshape(&self, new_shape: &[isize]) -> Result<Self, MininnError>;
+    fn slice(&self, axis: isize, start: isize, end: Option<isize>, step: isize) -> Self;
     fn pad(&self, opt: &PaddingOptions) -> Self;
-    fn conv(&self, kernel: &Self, stride: isize) -> Result<Self, EvalError>;
-    fn pool(&self, opt: &PoolOptions, average: bool) -> Result<Self, EvalError>;
+    fn conv(&self, kernel: &Self, stride: isize) -> Result<Self, MininnError>;
+    fn conv_kernel_grad(&self, input: &Self, stride: isize, kernel_shape: &[usize]) -> Result<Self, MininnError>;
+    fn pool(&self, opt: &PoolOptions, average: bool) -> Result<Self, MininnError>;
     fn exp(&self) -> Self;
     fn log(&self) -> Self;
     fn relu(&self) -> Self;
@@ -47,6 +50,7 @@ pub trait Value:
 
 /// Generic mapping of variable names to *something*.
 /// For example: Env<f64> maps variable names to concrete floating-point values
+#[derive(Debug, Clone)]
 pub struct Env<T: Value> {
     inner: BTreeMap<String, T>,
 }

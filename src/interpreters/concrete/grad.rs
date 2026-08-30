@@ -1,4 +1,4 @@
-use ndarray::{ArrayD, Axis, IxDyn, Slice, indices};
+use ndarray::{ArrayD, Axis, IxDyn};
 
 use crate::{
     interpreters::{
@@ -8,32 +8,35 @@ use crate::{
             eval_util::{Tensor, norm_axis_index},
         },
     },
-    mininn::{Atom, AtomKind, ComputeGraph, Env, PaddingOptions, PoolOptions, Primitive, Value},
+    mininn::{
+        Atom, AtomKind, ComputeGraph, Env, PaddingOptionConfig, PaddingOptions, PoolOptions,
+        Primitive, Value,
+    },
 };
 
 pub struct GradInterpreter;
 
-pub fn unbroadcast(g: Tensor, target: &[usize]) -> Tensor {
-    let mut arr = g.into_inner();
-    while arr.ndim() > target.len() {
-        arr = arr.sum_axis(Axis(0));
+pub fn unbroadcast<T: Value>(g: &T, target: &[usize]) -> T {
+    let mut g = g.clone();
+    while g.ndim() > target.len() {
+        g = g.reduce_sum(&[0]);
     }
     for i in 0..target.len() {
-        if target[i] == 1 && arr.shape()[i] > 1 {
-            arr = arr.sum_axis(Axis(i)).insert_axis(Axis(i));
+        if target[i] == 1 && g.shape()[i] > 1 {
+            g = g.reduce_sum(&[i as isize]).expand_dims(&[i as isize]);
         }
     }
-    arr.into()
+    g
 }
 
-fn vjp_where(tangent: &Tensor, condition: &Tensor) -> Result<Vec<Tensor>, EvalError> {
-    let zero: Tensor = ArrayD::zeros(IxDyn(condition.shape())).into();
-    let first = Tensor::r#where(condition, tangent, &zero)?;
-    let second = Tensor::r#where(condition, &zero, tangent)?;
+fn vjp_where<T: Value>(tangent: &T, condition: &T) -> Result<Vec<T>, EvalError> {
+    let zero: T = ArrayD::zeros(IxDyn(condition.shape())).into();
+    let first = T::r#where(condition, tangent, &zero)?;
+    let second = T::r#where(condition, &zero, tangent)?;
     Ok(vec![zero, first, second])
 }
 
-fn vjp_dot(tangent: &Tensor, a: &Tensor, b: &Tensor) -> Result<Vec<Tensor>, EvalError> {
+fn vjp_dot<T: Value>(tangent: &T, a: &T, b: &T) -> Result<Vec<T>, EvalError> {
     let dx = if b.ndim() == 0 {
         tangent.clone() * b.clone()
     } else if b.ndim() == 1 {
@@ -53,12 +56,12 @@ fn vjp_dot(tangent: &Tensor, a: &Tensor, b: &Tensor) -> Result<Vec<Tensor>, Eval
     Ok(vec![dx, dy])
 }
 
-fn vjp_conv(
-    tangent: &Tensor,
-    input: &Tensor,
-    kernel: &Tensor,
+fn vjp_conv<T: Value>(
+    tangent: &T,
+    input: &T,
+    kernel: &T,
     stride: isize,
-) -> Result<Vec<Tensor>, EvalError> {
+) -> Result<Vec<T>, EvalError> {
     if input.ndim() != 4 || kernel.ndim() != 4 {
         return Err(EvalError::Eval(
             "vjp_conv expects 4-D input and kernel".to_string(),
@@ -66,83 +69,131 @@ fn vjp_conv(
     }
 
     let s = stride as usize;
-    let (n, c, h, w) = (
-        input.shape()[0],
-        input.shape()[1],
-        input.shape()[2],
-        input.shape()[3],
-    );
-    let (ko, kh, kw) = (kernel.shape()[0], kernel.shape()[2], kernel.shape()[3]);
-    let oh = (h - kh) / s + 1;
-    let ow = (w - kw) / s + 1;
+    let kh = kernel.shape()[2];
+    let kw = kernel.shape()[3];
 
-    let t_arr = tangent.view();
-    let inp_arr = input.view();
-    let ker_arr = kernel.view();
+    // d_input: dilate tangent, pad borders, convolve with spatially-flipped transposed kernel
+    let dilated = tangent.pad(&PaddingOptions {
+        axes: vec![-2, -1],
+        config: PaddingOptionConfig {
+            left: 0,
+            interior: s - 1,
+            right: 0,
+        },
+        value: 0.0,
+    });
+    let padded = dilated
+        .pad(&PaddingOptions {
+            axes: vec![-2],
+            config: PaddingOptionConfig {
+                left: kh - 1,
+                interior: 0,
+                right: kh - 1,
+            },
+            value: 0.0,
+        })
+        .pad(&PaddingOptions {
+            axes: vec![-1],
+            config: PaddingOptionConfig {
+                left: kw - 1,
+                interior: 0,
+                right: kw - 1,
+            },
+            value: 0.0,
+        });
+    // flip kernel spatial dims and swap OC/IC: [OC,IC,KH,KW] → [IC,OC,KH,KW] flipped
+    let k_flip = kernel
+        .moveaxis(0, 1)
+        .slice(-2, -1, None, -1)
+        .slice(-1, -1, None, -1);
+    let d_input = padded.conv(&k_flip, 1)?;
 
-    let mut d_input = ArrayD::zeros(IxDyn(&[n, c, h, w]));
-    let mut d_kernel = ArrayD::zeros(IxDyn(kernel.shape()));
+    // d_kernel via the ConvKernelGrad primitive
+    let d_kernel = tangent.conv_kernel_grad(input, stride, kernel.shape())?;
 
-    for ni in 0..n {
-        for ci in 0..ko {
-            for hi in 0..oh {
-                for wi in 0..ow {
-                    let t = t_arr[[ni, ci, hi, wi]];
-                    for cpi in 0..c {
-                        for i in 0..kh {
-                            for j in 0..kw {
-                                d_input[[ni, cpi, s * hi + i, s * wi + j]] +=
-                                    t * ker_arr[[ci, cpi, i, j]];
-                                d_kernel[[ci, cpi, i, j]] +=
-                                    t * inp_arr[[ni, cpi, s * hi + i, s * wi + j]];
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    Ok(vec![d_input.into(), d_kernel.into()])
+    Ok(vec![d_input, d_kernel])
 }
 
-fn vjp_pad(tangent: &Tensor, a: &Tensor, opt: &PaddingOptions) -> Vec<Tensor> {
-    let mut arr = tangent.clone().into_inner();
+fn vjp_pad<T: Value>(tangent: &T, a: &T, opt: &PaddingOptions) -> Vec<T> {
+    let mut t = tangent.clone();
     for &ax in &opt.axes {
         let axis = norm_axis_index(ax, a.ndim());
         let si = a.shape()[axis];
-        let left = opt.config.left;
-        let step = opt.config.interior + 1;
+        let left = opt.config.left as isize;
+        let step = (opt.config.interior + 1) as isize;
         let end = if si == 0 {
             left
         } else {
-            left + step * (si - 1) + 1
+            left + step * (si as isize - 1) + 1
         };
-        arr = arr
-            .slice_axis(
-                Axis(axis),
-                Slice::new(left as isize, Some(end as isize), step as isize),
-            )
-            .to_owned();
+        t = t.slice(ax, left, Some(end), step);
     }
-    vec![arr.into()]
+    vec![t]
 }
 
-fn vjp_pool(tangent: &Tensor, input: &Tensor, opt: &PoolOptions, average: bool) -> Vec<Tensor> {
-    let mut d_input = ArrayD::zeros(IxDyn(input.shape()));
-    let window_size = opt.window_size.iter().product::<usize>() as f64;
+fn vjp_pool<T: Value>(tangent: &T, input: &T, opt: &PoolOptions, average: bool) -> Vec<T> {
+    let ndim = input.ndim();
+    let window_total: usize = opt.window_size.iter().product();
+    let scale = T::from(if average {
+        1.0 / window_total as f64
+    } else {
+        1.0_f64
+    });
 
-    for (out_idx, &t) in tangent.view().indexed_iter() {
-        let contrib = if average { t / window_size } else { t };
-        for win_idx in indices(IxDyn(&opt.window_size)) {
-            let in_idx: Vec<usize> = (0..input.ndim())
-                .map(|ax| out_idx[ax] * opt.stride[ax] + win_idx[ax])
-                .collect();
-            d_input[IxDyn(&in_idx)] += contrib;
+    let mut d_input: Option<T> = None;
+
+    for flat_j in 0..window_total {
+        // decode flat index into per-axis window offset
+        let mut j = vec![0usize; ndim];
+        let mut rem = flat_j;
+        for d in (0..ndim).rev() {
+            j[d] = rem % opt.window_size[d];
+            rem /= opt.window_size[d];
         }
+
+        // scatter tangent contribution for this window offset via pad
+        let mut t = tangent.clone() * scale.clone();
+        for d in 0..ndim {
+            let nd = input.shape()[d];
+            let md = tangent.shape()[d];
+            let sd = opt.stride[d];
+            let right = nd - j[d] - (md - 1) * sd - 1;
+            t = t.pad(&PaddingOptions {
+                axes: vec![d as isize],
+                config: PaddingOptionConfig {
+                    left: j[d],
+                    interior: sd - 1,
+                    right,
+                },
+                value: 0.0,
+            });
+        }
+
+        d_input = Some(match d_input {
+            None => t,
+            Some(acc) => acc + t,
+        });
     }
 
-    vec![d_input.into()]
+    vec![d_input.unwrap_or_else(|| T::from(ArrayD::zeros(IxDyn(input.shape()))))]
+}
+
+pub fn vjp_reducesum<T: Value>(operand: &T, tangent: &T, axes: &[isize]) -> Vec<T> {
+    let expanded = tangent.expand_dims(axes);
+    vec![expanded + T::from(ArrayD::zeros(IxDyn(operand.shape())))]
+}
+
+pub fn vjp_expanddims<T: Value>(tangent: &T, axes: &[isize]) -> Vec<T> {
+    vec![tangent.reduce_sum(axes)]
+}
+
+pub fn vjp_moveaxis<T: Value>(tangent: &T, source: isize, destination: isize) -> Vec<T> {
+    vec![tangent.moveaxis(destination, source)]
+}
+
+pub fn vjp_reshape<T: Value>(operand: &T, tangent: &T) -> Result<Vec<T>, EvalError> {
+    let orig_shape: Vec<isize> = operand.shape().iter().map(|&x| x as isize).collect();
+    Ok(vec![tangent.reshape(&orig_shape)?])
 }
 
 fn softmax_xent_vjp(logits: &Tensor, labels: &Tensor) -> Result<Tensor, EvalError> {
@@ -160,16 +211,12 @@ fn softmax_xent_vjp(logits: &Tensor, labels: &Tensor) -> Result<Tensor, EvalErro
 }
 
 impl GradInterpreter {
-    pub fn new() -> Self {
-        GradInterpreter
-    }
-
-    fn process_primitive(
+    pub fn process_primitive<T: Value>(
         primitive: &Primitive,
         outvar: &Atom,
-        primals: &Env<Tensor>,
-        env: &Env<Tensor>,
-    ) -> Result<Vec<Tensor>, EvalError> {
+        primals: &Env<T>,
+        env: &Env<T>,
+    ) -> Result<Vec<T>, EvalError> {
         let p = |a: &Atom| primals.resolve(a);
 
         let tangent = env.resolve(outvar)?;
@@ -178,108 +225,80 @@ impl GradInterpreter {
         Ok(match primitive {
             // elementwise unary
             Neg(_) => vec![-tangent],
-            Reciprocal(a) => {
-                let d = p(a)?.mapv(|x| -1.0 / (x * x));
-                vec![d * tangent]
-            }
-            Square(a) => vec![tangent * 2.0 * p(a)?],
-            Sqrt(_) => vec![tangent / (p(outvar)? * 2.0)],
+            Reciprocal(a) => vec![-(p(a)?.square().reciprocal()) * tangent],
+            Square(a) => vec![tangent * T::from(2.0) * p(a)?],
+            Sqrt(_) => vec![tangent * (p(outvar)? * T::from(2.0)).reciprocal()],
             Exp(_) => vec![tangent * p(outvar)?],
-            Log(a) => vec![tangent / p(a)?],
+            Log(a) => vec![tangent * p(a)?.reciprocal()],
             // elementwise binary (numpy broadcasting)
             Add(_, _) => vec![tangent.clone(), tangent],
             Mul(a, b) => vec![tangent.clone() * p(b)?, p(a)? * tangent],
             Where(c, _, _) => vjp_where(&tangent, &p(c)?)?,
             // activations
             Relu(_) => {
-                let zero: Tensor = ArrayD::zeros(IxDyn(tangent.shape())).into();
-                vec![Tensor::r#where(&p(outvar)?, &tangent, &zero)?]
+                let zero = T::from(ArrayD::zeros(IxDyn(tangent.shape())));
+                vec![T::r#where(&p(outvar)?, &tangent, &zero)?]
             }
             LeakyRelu { operand, slope } => {
                 let x = p(operand)?;
-                let steep = tangent.clone() * *slope;
-                vec![Tensor::r#where(&x.mapv(|v| v.max(0.0)), &tangent, &steep)?]
+                let steep = tangent.clone() * T::from(*slope);
+                vec![T::r#where(&x.relu(), &tangent, &steep)?]
             }
             Elu { operand, slope } => {
                 let val = p(operand)?;
-                let d_neg = tangent.clone() * *slope * val.exp();
-                vec![Tensor::r#where(&val, &tangent, &d_neg)?]
+                let d_neg = tangent.clone() * T::from(*slope) * val.exp();
+                vec![T::r#where(&val, &tangent, &d_neg)?]
             }
             Gelu(a) => {
                 let val = p(a)?;
-                let pdf = val.mapv(|x| (-0.5 * x * x).exp() / (2.0 * std::f64::consts::PI).sqrt());
+                let pdf = (-(val.square() * T::from(0.5))).exp()
+                    * T::from(1.0 / (2.0 * std::f64::consts::PI).sqrt());
                 vec![tangent * val.normcdf() + val * pdf]
             }
             NormalCdf(a) => {
-                let pdf =
-                    p(a)?.mapv(|x| (-0.5 * x * x).exp() / (2.0 * std::f64::consts::PI).sqrt());
+                let val = p(a)?;
+                let pdf = (-(val.square() * T::from(0.5))).exp()
+                    * T::from(1.0 / (2.0 * std::f64::consts::PI).sqrt());
                 vec![tangent * pdf]
             }
             // linear algebra
             Dot(a, b) => return vjp_dot(&tangent, &p(a)?, &p(b)?),
             // reduction
-            ReduceSum { operand, axes } => {
-                let x = p(operand)?;
-                let expanded = tangent.expand_dims(axes);
-                let arr = expanded
-                    .view()
-                    .broadcast(IxDyn(x.shape()))
-                    .ok_or_else(|| EvalError::Eval("reduce_sum vjp: broadcast failed".to_string()))?
-                    .to_owned();
-                vec![arr.into()]
-            }
+            ReduceSum { operand, axes } => vjp_reducesum(&p(operand)?, &tangent, axes),
             // shape manipulation
-            ExpandDims { operand: _, axes } => {
-                let shape = tangent.shape().to_vec();
-                vec![EvalInterpreter::process_primitive(
-                    &Primitive::ReduceSum {
-                        operand: Atom {
-                            name: String::new(),
-                            shape,
-                            kind: AtomKind::Const(tangent),
-                        },
-                        axes: axes.clone(),
-                    },
-                    env,
-                )?]
-            }
+            ExpandDims { operand: _, axes } => vjp_expanddims(&tangent, axes),
             MoveAxis {
                 operand: _,
                 source,
                 destination,
-            } => {
-                let shape = tangent.shape().to_vec();
-                vec![EvalInterpreter::process_primitive(
-                    &Primitive::MoveAxis {
-                        operand: Atom {
-                            name: String::new(),
-                            shape,
-                            kind: AtomKind::Const(tangent),
-                        },
-                        source: *destination,
-                        destination: *source,
-                    },
-                    env,
-                )?]
-            }
+            } => vjp_moveaxis(&tangent, *source, *destination),
             Reshape {
                 operand,
                 new_shape: _,
+            } => vjp_reshape(&p(operand)?, &tangent)?,
+            // slicing
+            Slice {
+                operand,
+                axis,
+                start,
+                end,
+                step,
             } => {
-                let orig_shape: Vec<isize> =
-                    p(operand)?.shape().iter().map(|&x| x as isize).collect();
-                let shape = tangent.shape().to_vec();
-                vec![EvalInterpreter::process_primitive(
-                    &Primitive::Reshape {
-                        operand: Atom {
-                            name: String::new(),
-                            shape,
-                            kind: AtomKind::Const(tangent),
-                        },
-                        new_shape: orig_shape,
+                let op = p(operand)?;
+                let ax = norm_axis_index(*axis, op.shape().len());
+                let n = tangent.shape()[ax];
+                let s = *start as usize;
+                let st = *step as usize;
+                let right = op.shape()[ax] - s - if n > 0 { (n - 1) * st + 1 } else { 0 };
+                vec![tangent.pad(&PaddingOptions {
+                    axes: vec![*axis],
+                    config: PaddingOptionConfig {
+                        left: s,
+                        interior: st - 1,
+                        right,
                     },
-                    env,
-                )?]
+                    value: 0.0,
+                })]
             }
             // padding
             Pad { operand, options } => vjp_pad(&tangent, &p(operand)?, options),
@@ -289,6 +308,7 @@ impl GradInterpreter {
                 kernel,
                 options,
             } => return vjp_conv(&tangent, &p(input)?, &p(kernel)?, options.stride),
+            ConvKernelGrad { .. } => todo!("second-order conv gradient not yet implemented"),
             // pooling
             AvgPool { operand, options } => vjp_pool(&tangent, &p(operand)?, options, true),
             SumPool { operand, options } => vjp_pool(&tangent, &p(operand)?, options, false),
@@ -316,10 +336,14 @@ impl GradInterpreter {
         let mut env: Env<Tensor> = Env::new();
 
         fn combine(var: &Atom, tangent: Tensor, env: &mut Env<Tensor>) {
+            if let AtomKind::Const(_) = var.kind {
+                return;
+            }
+
             if let Some(t) = env.get(&var.name) {
-                env.update(&var.name, t.clone() + unbroadcast(tangent, &var.shape));
+                env.update(&var.name, t.clone() + unbroadcast(&tangent, &var.shape));
             } else {
-                env.insert(var.name.clone(), unbroadcast(tangent, &var.shape));
+                env.insert(var.name.clone(), unbroadcast(&tangent, &var.shape));
             }
         }
 

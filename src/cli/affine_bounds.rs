@@ -2,7 +2,10 @@ use std::path::{Path, PathBuf};
 
 use clap::Args;
 use mininn_verifier::{
-    interpreters::{EvalError, IBPInterpreter, IBPTensor, Interpreter},
+    interpreters::{
+        EvalError,
+        bounds::{abp::ABPInterpreter, ibp_util::IBPTensor},
+    },
     mininn::{ComputeGraph, load_input_as_arr, load_mininn, write_output_bin},
 };
 
@@ -52,7 +55,7 @@ impl AffineBoundsArgs {
 
                     let lb = load_input_as_arr(Path::new(&tokens[i + 1]), &var.shape)?;
                     let ub = load_input_as_arr(Path::new(&tokens[i + 2]), &var.shape)?;
-                    specs.push(IBPTensor::new(lb, ub));
+                    specs.push(IBPTensor::new(lb.into(), ub.into()));
                     i += 3;
                 }
                 "point" => {
@@ -86,22 +89,34 @@ pub fn run_affine_bounds(args: AffineBoundsArgs) -> Result<(), EvalError> {
 
     std::fs::create_dir_all(&args.output_dir)?;
 
-    let outputs = IBPInterpreter::run(&graph, &inputs)?;
+    let outputs = ABPInterpreter::run(&graph, &inputs)?;
 
-    for (i, tensor) in outputs.iter().enumerate() {
-        let lb_weight_path = args.output_dir.join(format!("output_lb_weight.bin"));
-        let lb_bias_path = args.output_dir.join(format!("output_lb_bias.bin"));
-        let ub_weight_path = args.output_dir.join(format!("output_ub_weight.bin"));
-        let ub_bias_path = args.output_dir.join(format!("output_ub_bias.bin"));
+    let lb_weight_path = args.output_dir.join(format!("output_lb_weight.bin"));
+    let lb_bias_path = args.output_dir.join(format!("output_lb_bias.bin"));
+    let ub_weight_path = args.output_dir.join(format!("output_ub_weight.bin"));
+    let ub_bias_path = args.output_dir.join(format!("output_ub_bias.bin"));
 
-        // write_output_bin(&lb_path, &tensor.lb.iter().copied().collect::<Vec<_>>())?;
-        // write_output_bin(&ub_path, &tensor.ub.iter().copied().collect::<Vec<_>>())?;
+    write_output_bin(
+        &lb_weight_path,
+        &outputs.0.weights.iter().copied().collect::<Vec<_>>(),
+    )?;
+    write_output_bin(
+        &lb_bias_path,
+        &outputs.0.biases.iter().copied().collect::<Vec<_>>(),
+    )?;
+    write_output_bin(
+        &ub_weight_path,
+        &outputs.1.weights.iter().copied().collect::<Vec<_>>(),
+    )?;
+    write_output_bin(
+        &ub_bias_path,
+        &outputs.1.biases.iter().copied().collect::<Vec<_>>(),
+    )?;
 
-        println!("{}", lb_weight_path.display());
-        println!("{}", lb_bias_path.display());
-        println!("{}", ub_weight_path.display());
-        println!("{}", ub_bias_path.display());
-    }
+    println!("{}", lb_weight_path.display());
+    println!("{}", lb_bias_path.display());
+    println!("{}", ub_weight_path.display());
+    println!("{}", ub_bias_path.display());
 
     Ok(())
 }
