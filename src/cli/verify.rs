@@ -16,14 +16,14 @@ use mininn_verifier::{
 pub struct VerifyArgs {
     /// Directory to write output `.bin` files into.
     #[arg(long)]
-    output_dir: PathBuf,
+    pub output_dir: PathBuf,
 
     /// The `.mininn` network file to load.
-    mininn_file: PathBuf,
+    pub mininn_file: PathBuf,
 
     /// Input specifications: `box <lb.bin> <ub.bin>` or `point <x.bin>`, repeatable.
     #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
-    input_spec: Vec<String>,
+    pub input_spec: Vec<String>,
 }
 
 impl VerifyArgs {

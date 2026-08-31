@@ -25,6 +25,13 @@ pub trait Value:
     fn ndim(&self) -> usize;
     fn len(&self) -> usize;
 
+    /// The concrete tensor behind this value, or `None` for symbolic values
+    /// (e.g. autodiff tracers). Lets generic bound passes tell whether they are
+    /// running concretely — used to compute concrete-only branching heuristics.
+    fn as_tensor(&self) -> Option<&Tensor> {
+        None
+    }
+
     fn r#where(cond: &Self, x: &Self, y: &Self) -> Result<Self, MininnError>;
     fn moveaxis(&self, src: isize, dst: isize) -> Self;
     fn dot(&self, b: &Self) -> Result<Self, MininnError>;
@@ -37,7 +44,12 @@ pub trait Value:
     fn slice(&self, axis: isize, start: isize, end: Option<isize>, step: isize) -> Self;
     fn pad(&self, opt: &PaddingOptions) -> Self;
     fn conv(&self, kernel: &Self, stride: isize) -> Result<Self, MininnError>;
-    fn conv_kernel_grad(&self, input: &Self, stride: isize, kernel_shape: &[usize]) -> Result<Self, MininnError>;
+    fn conv_kernel_grad(
+        &self,
+        input: &Self,
+        stride: isize,
+        kernel_shape: &[usize],
+    ) -> Result<Self, MininnError>;
     fn pool(&self, opt: &PoolOptions, average: bool) -> Result<Self, MininnError>;
     fn exp(&self) -> Self;
     fn log(&self) -> Self;
@@ -91,5 +103,10 @@ impl<T: Value> Env<T> {
 
     pub fn len(&self) -> usize {
         self.inner.len()
+    }
+
+    /// Iterate entries in variable-name order (the backing map is a `BTreeMap`).
+    pub fn iter(&self) -> impl Iterator<Item = (&String, &T)> {
+        self.inner.iter()
     }
 }

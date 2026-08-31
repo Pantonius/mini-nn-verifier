@@ -4,7 +4,7 @@ use clap::Args;
 use mininn_verifier::{
     interpreters::{
         EvalError,
-        bounds::{abp::ABPInterpreter, ibp_util::IBPTensor},
+        bounds::{alpha_crown::AlphaCrownInterpreter, ibp_util::IBPTensor},
     },
     mininn::{ComputeGraph, load_input_as_arr, load_mininn, write_output_bin},
 };
@@ -89,7 +89,7 @@ pub fn run_affine_bounds(args: AffineBoundsArgs) -> Result<(), EvalError> {
 
     std::fs::create_dir_all(&args.output_dir)?;
 
-    let outputs = ABPInterpreter::run(&graph, &inputs)?;
+    let outputs = AlphaCrownInterpreter::run(&graph, &inputs)?;
 
     let lb_weight_path = args.output_dir.join(format!("output_lb_weight.bin"));
     let lb_bias_path = args.output_dir.join(format!("output_lb_bias.bin"));

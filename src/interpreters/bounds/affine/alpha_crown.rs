@@ -1,507 +1,48 @@
-use ndarray::{ArrayD, Zip};
+use ndarray::Zip;
 
 use crate::{
     interpreters::{
         EvalError, Interpreter,
         bounds::{
-            abp_util::{
-                ABPTensor, bound_convex, exp_lines, lbp_inner, normcdf_lines, reciprocal_lines,
-                sqrt_lines, square_lines,
-            },
+            affine::crown::{crown_relu, linear_lower_bound},
             ibp::IBPInterpreter,
             ibp_util::IBPTensor,
+            lbp_util::{AffineBounds, bound_convex, elu_lines, gelu_lines},
         },
         compute_graph::{tracer::Tracer, try_trace_graph},
-        concrete::{
-            eval_util::{Tensor, norm_axis_index},
-            grad::{
-                GradInterpreter, unbroadcast, vjp_conv, vjp_expanddims, vjp_moveaxis, vjp_pad,
-                vjp_pool, vjp_reshape,
-            },
-        },
+        concrete::{eval_util::Tensor, grad::GradInterpreter},
     },
-    mininn::{
-        Atom, AtomKind, ComputeGraph, Env, PaddingOptionConfig, PaddingOptions, Primitive, Value,
-    },
+    mininn::{Activation, ComputeGraph, Env, Primitive, Value},
 };
 
-pub struct ABPInterpreter {}
+pub struct AlphaCrownInterpreter {}
 
-impl ABPInterpreter {
-    fn crown_relu<T: Value>(
+impl AlphaCrownInterpreter {
+    pub(super) fn crown_activation<T: Value>(
         alpha: &T,
         out_w: &T,
         x: &IBPTensor,
-        slope: f64,
-    ) -> Result<ABPTensor<T>, EvalError> {
-        // Compute concrete slope/offset tensors from IBP bounds.
-        let upper_slope: Tensor = Zip::from(&x.lb)
-            .and(&x.ub)
-            .map_collect(|&l, &u| {
-                if l >= 0.0 {
-                    1.0
-                } else if u <= 0.0 {
-                    slope
-                } else {
-                    u / (u - l)
-                }
-            })
-            .into();
-        let upper_offset: Tensor = Zip::from(&x.lb)
-            .and(&x.ub)
-            .map_collect(|&l, &u| {
-                if l >= 0.0 || u <= 0.0 {
-                    0.0
-                } else {
-                    -u * l / (u - l)
-                }
-            })
-            .into();
-        // Mask selects the (remapped) alpha for ambiguous neurons, fixed slope elsewhere.
-        let ambiguous: Tensor = Zip::from(&x.lb)
-            .and(&x.ub)
-            .map_collect(|&l, &u| if l < 0.0 && u > 0.0 { 1.0 } else { 0.0 })
-            .into();
-        let fixed_slopes: Tensor = x.lb.mapv(|l| if l >= 0.0 { 1.0 } else { slope });
-
-        // remap alpha into [slope, 1]
-        // (slope = 0 : plain relu, where the remap is the identity.)
-        let lower_alpha = alpha.clone() * T::from(1.0 - slope) + T::from(slope);
-        let lower_slope = T::r#where(&T::from(ambiguous), &lower_alpha, &T::from(fixed_slopes))?;
-        let upper_slope = T::from(upper_slope);
-        let upper_offset = T::from(upper_offset);
-
-        let pos_w = out_w.relu();
-        let neg_w = out_w.clone() - pos_w.clone();
-
-        Ok(ABPTensor {
-            weights: lower_slope * pos_w + upper_slope * neg_w.clone(),
-            biases: lbp_inner(&upper_offset, &neg_w),
-        })
-    }
-
-    fn crown_where<T: Value>(
-        out_w: &T,
-        cond: &IBPTensor,
-        x: &IBPTensor,
-        y: &IBPTensor,
-    ) -> Vec<ABPTensor<T>> {
-        // just true
-        let mask_true: Tensor = Zip::from(&cond.lb)
-            .and(&cond.ub)
-            .map_collect(|&cl, &cu| if cl > 0.0 || cu < 0.0 { 1.0 } else { 0.0 })
-            .into();
-        // just false
-        let mask_false: Tensor = Zip::from(&cond.lb)
-            .and(&cond.ub)
-            .map_collect(|&cl, &cu| if cl == 0.0 && cu == 0.0 { 1.0 } else { 0.0 })
-            .into();
-        // anything else
-        let mask_amb: Tensor = Zip::from(&mask_true)
-            .and(&mask_false)
-            .map_collect(|&t, &f| 1.0 - t - f)
-            .into();
-
-        let e_lo: Tensor = Zip::from(&x.lb)
-            .and(&y.lb)
-            .map_collect(|&a, &b| a.min(b))
-            .into();
-        let e_hi: Tensor = Zip::from(&x.ub)
-            .and(&y.ub)
-            .map_collect(|&a, &b| a.max(b))
-            .into();
-
-        let pos_w = out_w.relu();
-        let neg_w = out_w.clone() - pos_w.clone();
-
-        let in_w_x = out_w.clone() * T::from(mask_true);
-        let in_w_y = out_w.clone() * T::from(mask_false);
-        let amb_bias = lbp_inner(&(pos_w * T::from(mask_amb.clone())), &T::from(e_lo))
-            + lbp_inner(&(neg_w * T::from(mask_amb)), &T::from(e_hi));
-
-        vec![
-            ABPTensor {
-                weights: T::from(ArrayD::zeros(ndarray::IxDyn(cond.lb.shape()))),
-                biases: T::from(0.0),
-            },
-            ABPTensor {
-                weights: in_w_x,
-                biases: amb_bias,
-            },
-            ABPTensor {
-                weights: in_w_y,
-                biases: T::from(0.0),
-            },
-        ]
-    }
-
-    fn crown_mul<T: Value>(w: &T, x: &IBPTensor, y: &IBPTensor) -> Vec<ABPTensor<T>> {
-        let pos_w = w.relu();
-        let neg_w = w.clone() - pos_w.clone();
-
-        let in_w_x = pos_w.clone() * T::from(y.lb.clone()) + neg_w.clone() * T::from(y.ub.clone());
-        let in_w_y = w.clone() * T::from(x.lb.clone());
-
-        let in_bias = lbp_inner(&pos_w, &T::from(-x.lb.clone() * y.lb.clone()))
-            + lbp_inner(&neg_w, &T::from(-x.lb.clone() * y.ub.clone()));
-
-        vec![
-            ABPTensor {
-                weights: in_w_x,
-                biases: in_bias.clone(),
-            },
-            ABPTensor {
-                weights: in_w_y,
-                biases: T::from(0.0),
-            },
-        ]
-    }
-
-    fn crown_dot<T: Value>(
-        w: &T,
-        x: &IBPTensor,
-        y: &IBPTensor,
-    ) -> Result<Vec<ABPTensor<T>>, EvalError> {
-        let pos_w = w.relu();
-        let neg_w = w.clone() - pos_w.clone();
-
-        // If either a or b is 0-D (scalar), it is equivalent to multiply and using numpy.multiply(a, b) or a * b is preferred.
-        // If both a and b are 1-D arrays, it is inner product of vectors (without complex conjugation).
-        if x.ndim() == 0 || y.ndim() == 0 || (x.ndim() == 1 && y.ndim() == 1) {
-            return Ok(Self::crown_mul(&w, &x, &y));
-        }
-
-        let in_w_x: T;
-        let in_w_y: T;
-        let lower_c: T;
-        let upper_c: T;
-
-        if x.ndim() == 1 && y.ndim() == 2 {
-            in_w_x = T::from(y.lb.clone()).dot(&pos_w)? + T::from(y.ub.clone()).dot(&neg_w)?;
-            in_w_y = T::from(x.lb.expand_dims(&[1])) * w.clone().expand_dims(&[0]);
-
-            lower_c = T::from(y.lb.moveaxis(0, 1).dot(&x.lb)?);
-            upper_c = T::from(y.ub.moveaxis(0, 1).dot(&x.lb)?);
-        } else if y.ndim() == 1 {
-            // Matrix · vector: x = [.., M, K], y = [K] → z = [.., M]. Mirror of the
-            // 2-D·2-D case with `x` pinned at its lower bound.
-            in_w_x = pos_w.expand_dims(&[-1]) * T::from(y.lb.expand_dims(&[0]))
-                + neg_w.expand_dims(&[-1]) * T::from(y.ub.expand_dims(&[0]));
-            in_w_y = T::from(x.lb.moveaxis(0, 1)).dot(&w)?;
-
-            lower_c = T::from(x.lb.clone().dot(&y.lb.clone())?);
-            upper_c = T::from(x.lb.clone().dot(&y.ub.clone())?);
-        } else {
-            in_w_x = pos_w.dot(&T::from(y.lb.moveaxis(0, 1)))?
-                + neg_w.dot(&T::from(y.ub.moveaxis(0, 1)))?;
-            in_w_y = T::from(x.lb.moveaxis(0, 1)).dot(&w)?;
-
-            lower_c = T::from(x.lb.clone().dot(&y.lb.clone())?);
-            upper_c = T::from(x.lb.clone().dot(&y.ub.clone())?);
-        }
-        let in_bias = lbp_inner(&pos_w, &(-lower_c)) + lbp_inner(&neg_w, &(-upper_c));
-
-        Ok(vec![
-            ABPTensor {
-                weights: in_w_x,
-                biases: in_bias.clone(),
-            },
-            ABPTensor {
-                weights: in_w_y,
-                biases: T::from(0.0),
-            },
-        ])
-    }
-
-    fn crown_pad<T: Value>(
-        out_w: &T,
-        operand_shape: &[usize],
-        options: &PaddingOptions,
-    ) -> ABPTensor<T> {
-        let operand_zeros = T::from(ArrayD::zeros(ndarray::IxDyn(operand_shape)));
-        let in_w = vjp_pad(out_w, &operand_zeros, options)[0].clone();
-        let pad_fill = operand_zeros.pad(options);
-        ABPTensor {
-            weights: in_w,
-            biases: lbp_inner(out_w, &pad_fill),
+        activation: &Activation,
+    ) -> Result<AffineBounds<T>, EvalError> {
+        match activation {
+            Activation::Relu(_) => crown_relu(alpha, out_w, x, 0.0),
+            Activation::LeakyRelu { slope, .. } => crown_relu(alpha, out_w, x, *slope),
+            Activation::Elu { slope, .. } => Ok(bound_convex(
+                x,
+                out_w,
+                |l, u| elu_lines(l, u, *slope),
+                |_, _| Ok(()),
+            )?),
+            // Like Elu, GELU ignores `alpha` and uses fixed relaxation lines.
+            Activation::Gelu(_) => Ok(bound_convex(x, out_w, gelu_lines, |_, _| Ok(()))?),
         }
     }
 
-    pub fn linear_lower_bound<T: Value>(
-        graph: &ComputeGraph,
-        var_bounds: &Env<IBPTensor>,
-        params: &Env<T>,
-    ) -> Result<ABPTensor<T>, EvalError> {
-        // checks
-        if graph.outvars.len() != 1 {
-            return Err(EvalError::Eval(format!(
-                "Found {} outvars, but Affine Bound Propogation only supports nets with a single outvar",
-                graph.outvars.len()
-            )));
-        }
-
-        if graph.invars.len() != 1 {
-            return Err(EvalError::Eval(format!(
-                "Found {} invars, but Affine Bound Propogation only supports nets with a single invar.",
-                graph.invars.len()
-            )));
-        }
-
-        let outvar = &graph.outvars[0];
-
-        let mut weights = Env::new();
-        weights.insert(
-            outvar.name.clone(),
-            T::from(ArrayD::from_elem(outvar.shape.clone(), 1.0)),
-        );
-        let mut bias = T::from(0.0_f64);
-
-        let b = |var: &Atom| var_bounds.resolve(var);
-        let p = |var: &Atom| params.resolve(var);
-
-        for eqn in graph.equations.iter().rev() {
-            if weights.get(&eqn.outvar.name).is_none() {
-                continue;
-            }
-
-            let out_w = weights.resolve(&eqn.outvar)?;
-            // process primitive
-            let affs = match &eqn.primitive {
-                Primitive::Neg(_) => {
-                    vec![ABPTensor {
-                        weights: -out_w,
-                        biases: T::from(0.0_f64),
-                    }]
-                }
-                Primitive::Reciprocal(xa) => {
-                    let x = b(&xa)?;
-
-                    vec![bound_convex(&x, &out_w, reciprocal_lines, |l, u| {
-                        if l <= 0.0 && u >= 0.0 {
-                            Err(EvalError::Eval(format!(
-                                "Reciprocal relaxation requires an input interval away from 0, got [{l}, {u}]"
-                            )))
-                        } else {
-                            Ok(())
-                        }
-                    })?]
-                }
-                Primitive::Square(xa) => {
-                    let x = b(&xa)?;
-
-                    vec![bound_convex(&x, &out_w, square_lines, |_, _| Ok(()))?]
-                }
-                Primitive::Sqrt(xa) => {
-                    let x = b(&xa)?;
-
-                    vec![bound_convex(&x, &out_w, sqrt_lines, |l, u| {
-                        if l < 0.0 {
-                            Err(EvalError::Eval(format!(
-                                "Sqrt relaxation requires a non-negative input interval, got [{l}, {u}]"
-                            )))
-                        } else {
-                            Ok(())
-                        }
-                    })?]
-                }
-                Primitive::Exp(xa) => {
-                    let x = b(&xa)?;
-
-                    vec![bound_convex(&x, &out_w, exp_lines, |_, _| Ok(()))?]
-                }
-                Primitive::Log(_) => todo!(),
-                Primitive::Add(..) => {
-                    let zero = T::from(0.0_f64);
-                    vec![
-                        ABPTensor {
-                            weights: out_w.clone(),
-                            biases: zero.clone(),
-                        },
-                        ABPTensor {
-                            weights: out_w,
-                            biases: zero,
-                        },
-                    ]
-                }
-                Primitive::Mul(xa, ya) => {
-                    let x = b(xa)?;
-                    let y = b(ya)?;
-
-                    Self::crown_mul(&out_w, &x, &y)
-                }
-                Primitive::Where(cond, xa, ya) => {
-                    Self::crown_where(&out_w, &b(cond)?, &b(xa)?, &b(ya)?)
-                }
-                Primitive::Relu(atom) => {
-                    vec![Self::crown_relu(
-                        &p(&eqn.outvar)?,
-                        &weights.resolve(&eqn.outvar)?,
-                        &b(&atom)?,
-                        0.0,
-                    )?]
-                }
-                Primitive::LeakyRelu { operand, slope } => vec![Self::crown_relu(
-                    &p(&eqn.outvar)?,
-                    &weights.resolve(&eqn.outvar)?,
-                    &b(&operand)?,
-                    *slope,
-                )?],
-                Primitive::Elu {
-                    operand: _,
-                    slope: _,
-                } => todo!(),
-                Primitive::Gelu(_) => todo!(),
-                Primitive::NormalCdf(xa) => {
-                    let x = b(&xa)?;
-
-                    vec![bound_convex(&x, &out_w, normcdf_lines, |_, _| Ok(()))?]
-                }
-                Primitive::Dot(xa, ya) => {
-                    let x = b(&xa)?;
-                    let y = b(&ya)?;
-
-                    Self::crown_dot(&out_w, &x, &y)?
-                }
-                Primitive::ReduceSum { operand, axes } => {
-                    let zero = T::from(0.0_f64);
-                    let broadcast_target = T::from(ArrayD::zeros(ndarray::IxDyn(&operand.shape)));
-                    vec![ABPTensor {
-                        weights: out_w.expand_dims(axes) + broadcast_target,
-                        biases: zero,
-                    }]
-                }
-                Primitive::ExpandDims { operand: _, axes } => {
-                    let in_w = vjp_expanddims(&out_w, axes)[0].clone();
-                    vec![ABPTensor {
-                        weights: in_w,
-                        biases: T::from(0.0_f64),
-                    }]
-                }
-                Primitive::MoveAxis {
-                    operand: _,
-                    source,
-                    destination,
-                } => {
-                    let in_w = vjp_moveaxis(&out_w, *source, *destination)[0].clone();
-                    vec![ABPTensor {
-                        weights: in_w,
-                        biases: T::from(0.0_f64),
-                    }]
-                }
-                Primitive::Reshape {
-                    operand,
-                    new_shape: _,
-                } => {
-                    let in_w = vjp_reshape(&T::from(b(operand)?.lb), &out_w)?[0].clone();
-                    vec![ABPTensor {
-                        weights: in_w,
-                        biases: T::from(0.0_f64),
-                    }]
-                }
-                Primitive::Slice {
-                    operand,
-                    axis,
-                    start,
-                    end: _,
-                    step,
-                } => {
-                    let ax = norm_axis_index(*axis, operand.shape.len());
-                    let n = out_w.shape()[ax];
-                    let s = *start as usize;
-                    let st = *step as usize;
-                    let right = operand.shape[ax] - s - if n > 0 { (n - 1) * st + 1 } else { 0 };
-                    vec![ABPTensor {
-                        weights: out_w.pad(&PaddingOptions {
-                            axes: vec![*axis],
-                            config: PaddingOptionConfig {
-                                left: s,
-                                interior: st - 1,
-                                right,
-                            },
-                            value: 0.0,
-                        }),
-                        biases: T::from(0.0_f64),
-                    }]
-                }
-                Primitive::Pad { operand, options } => {
-                    vec![Self::crown_pad(&out_w, &operand.shape, options)]
-                }
-                Primitive::Conv {
-                    input,
-                    kernel,
-                    options,
-                } => {
-                    let AtomKind::Const(kernel_val) = &kernel.kind else {
-                        return Err(EvalError::Eval(
-                            "Conv affine bound requires a constant kernel".to_string(),
-                        ));
-                    };
-                    let input_zeros = T::from(ArrayD::zeros(ndarray::IxDyn(&input.shape)));
-                    let in_w = vjp_conv(
-                        &out_w,
-                        &input_zeros,
-                        &T::from(kernel_val.clone()),
-                        options.stride,
-                    )?[0]
-                        .clone();
-                    vec![ABPTensor {
-                        weights: in_w,
-                        biases: T::from(0.0),
-                    }]
-                }
-                Primitive::ConvKernelGrad { .. } => todo!(),
-                Primitive::AvgPool { operand, options } => {
-                    let operand_zeros = T::from(ArrayD::zeros(ndarray::IxDyn(&operand.shape)));
-                    let in_w = vjp_pool(&out_w, &operand_zeros, options, true)[0].clone();
-                    vec![ABPTensor {
-                        weights: in_w,
-                        biases: T::from(0.0),
-                    }]
-                }
-                Primitive::SumPool { operand, options } => {
-                    let operand_zeros = T::from(ArrayD::zeros(ndarray::IxDyn(&operand.shape)));
-                    let in_w = vjp_pool(&out_w, &operand_zeros, options, false)[0].clone();
-                    vec![ABPTensor {
-                        weights: in_w,
-                        biases: T::from(0.0),
-                    }]
-                }
-            };
-
-            // accumulate / early concretize
-            for (invar, aff) in eqn.primitive.operands().iter().zip(affs) {
-                let in_w = unbroadcast(&aff.weights, &invar.shape);
-                bias = bias + aff.biases;
-
-                if let AtomKind::Const(val) = &invar.kind {
-                    let iw = T::from(val.clone()) * in_w;
-                    let axes: Vec<isize> = (0..iw.ndim() as isize).collect();
-                    bias = bias + iw.reduce_sum(&axes);
-                } else if let Some(existing) = weights.get(&invar.name) {
-                    weights.update(&invar.name, existing.clone() + in_w);
-                } else {
-                    weights.insert(invar.name.clone(), in_w);
-                }
-            }
-        }
-
-        let invar = &graph.invars[0];
-        let invar_w = weights
-            .get(&invar.name)
-            .cloned()
-            .unwrap_or_else(|| T::from(ArrayD::zeros(ndarray::IxDyn(&invar.shape))));
-
-        Ok(ABPTensor {
-            weights: invar_w,
-            biases: bias,
-        })
-    }
-
-    fn alpha_crown_optim(
+    pub fn alpha_crown_optim(
         graph: &ComputeGraph,
         ibp_bounds: &Env<IBPTensor>,
         mut params: Env<Tensor>,
-    ) -> Result<ABPTensor<Tensor>, EvalError> {
+    ) -> Result<AffineBounds<Tensor>, EvalError> {
         if params.len() > 0 {
             const ITERS: usize = 10;
             const LR: f64 = 0.01;
@@ -525,7 +66,19 @@ impl ABPInterpreter {
                         .collect(),
                 ),
                 |tracer_params| -> Result<Tracer, EvalError> {
-                    let alb = Self::linear_lower_bound(graph, ibp_bounds, &tracer_params)?;
+                    let alb = linear_lower_bound(
+                        graph,
+                        ibp_bounds,
+                        |outvar, out_w, x, activation| {
+                            Self::crown_activation(
+                                &tracer_params.resolve(outvar)?,
+                                out_w,
+                                x,
+                                activation,
+                            )
+                        },
+                        None,
+                    )?;
                     Ok(alb.concretize(
                         &Tracer::from(invar_bounds.lb.clone()),
                         &Tracer::from(invar_bounds.ub.clone()),
@@ -549,15 +102,22 @@ impl ABPInterpreter {
             }
         }
 
-        Self::linear_lower_bound(graph, &ibp_bounds, &params)
+        linear_lower_bound(
+            graph,
+            &ibp_bounds,
+            |outvar, out_w, x, activation| {
+                Self::crown_activation(&params.resolve(outvar)?, out_w, x, activation)
+            },
+            None,
+        )
     }
 }
 
-impl ABPInterpreter {
+impl AlphaCrownInterpreter {
     pub fn run(
         graph: &ComputeGraph,
         inputs: &Vec<IBPTensor>,
-    ) -> Result<(ABPTensor<Tensor>, ABPTensor<Tensor>), EvalError> {
+    ) -> Result<(AffineBounds<Tensor>, AffineBounds<Tensor>), EvalError> {
         // === alpha-CROWN ===
 
         // --- Forward ---
@@ -618,7 +178,7 @@ impl ABPInterpreter {
         })?;
 
         let lb_neg = Self::alpha_crown_optim(&neg_graph, &ibp_bounds, params.clone())?;
-        let ub = ABPTensor {
+        let ub = AffineBounds {
             weights: -lb_neg.weights,
             biases: -lb_neg.biases,
         };
@@ -629,10 +189,80 @@ impl ABPInterpreter {
 
 #[cfg(test)]
 mod tests {
-    use crate::interpreters::concrete::eval_util::normcdf;
+    use crate::{
+        interpreters::{
+            bounds::{
+                affine::crown::{crown_dot, crown_pad},
+                lbp_util::{exp_lines, normcdf_lines, reciprocal_lines, sqrt_lines, square_lines},
+            },
+            concrete::{eval_util::normcdf, grad::unbroadcast},
+        },
+        mininn::{PaddingOptionConfig, PaddingOptions},
+    };
 
     use super::*;
-    use ndarray::IxDyn;
+    use ndarray::{ArrayD, IxDyn};
+
+    /// The GELU relaxation must sandwich `g(x) = x·Φ(x)` over the whole interval.
+    /// Enable (drop `#[ignore]`) once `gelu_lines` is implemented.
+    #[test]
+    // #[ignore = "enable once gelu_lines is implemented"]
+    fn gelu_lines_are_sound() {
+        use crate::interpreters::bounds::lbp_util::gelu_lines;
+        let g = |x: f64| x * normcdf(x);
+        // Convex-only, concave-only (both tails), crossing one/both inflections
+        // at ±√2, plus narrow/degenerate.
+        let cases = [
+            (-1.0, 1.0),   // fully convex
+            (-1.4, 1.4),   // convex, up to the inflection edges
+            (-3.0, -1.5),  // fully concave (left tail)
+            (1.5, 3.0),    // fully concave (right tail)
+            (-2.0, 0.5),   // crosses left inflection
+            (-0.5, 2.0),   // crosses right inflection
+            (-3.0, 3.0),   // crosses both inflections
+            (-2.0, -1.0),  // straddles left inflection
+            (1.0, 3.0),    // crosses right inflection, both endpoints steep
+            (1.4, 1.45),   // crosses right inflection, very narrow convex sliver
+            (-1.6, -1.41), // straddles left inflection, narrow
+            (-6.0, 6.0),   // crosses both, wide
+            (-0.01, 0.01), // near-degenerate around the origin
+            (0.7, 0.7),    // degenerate
+        ];
+
+        let tol = 1e-6;
+        let n = 400;
+        let check = |l: f64, u: f64| {
+            let (ls, lo, us, uo) = gelu_lines(l, u);
+            for i in 0..=n {
+                let x = l + (u - l) * (i as f64) / (n as f64);
+                let f = g(x);
+                assert!(
+                    ls * x + lo <= f + tol,
+                    "lower line above g on [{l}, {u}] at x={x}: {} > {f}",
+                    ls * x + lo,
+                );
+                assert!(
+                    us * x + uo >= f - tol,
+                    "upper line below g on [{l}, {u}] at x={x}: {} < {f}",
+                    us * x + uo,
+                );
+            }
+        };
+
+        for (l, u) in cases {
+            check(l, u);
+        }
+
+        // Dense grid sweep over endpoints straddling the ±√2 inflections.
+        let grid = 40;
+        for i in 0..=grid {
+            let l = -4.0 + 8.0 * (i as f64) / (grid as f64);
+            for j in 0..=grid {
+                let u = l + 6.0 * (j as f64) / (grid as f64);
+                check(l, u);
+            }
+        }
+    }
 
     /// The linear relaxation must sandwich Φ over the whole interval:
     /// `lower_slope·x + lower_offset ≤ Φ(x) ≤ upper_slope·x + upper_offset`.
@@ -937,7 +567,7 @@ mod tests {
                 .collect();
             let out_w = arr(&w_data, px.shape());
 
-            let aff = ABPInterpreter::crown_pad(&out_w, &operand_shape, &options);
+            let aff = crown_pad(&out_w, &operand_shape, &options);
 
             let lhs = fold_dot(&out_w, &px);
             let rhs = fold_dot(&aff.weights, &x) + scalar(&aff.biases);
@@ -967,7 +597,7 @@ mod tests {
     fn assert_dot_sound(xl: &Tensor, xu: &Tensor, yl: &Tensor, yu: &Tensor, out_w: &Tensor) {
         let x = IBPTensor::new(xl.clone(), xu.clone());
         let y = IBPTensor::new(yl.clone(), yu.clone());
-        let affs = ABPInterpreter::crown_dot(out_w, &x, &y).unwrap();
+        let affs = crown_dot(out_w, &x, &y).unwrap();
         assert_eq!(affs.len(), 2);
 
         let wx = unbroadcast(&affs[0].weights, xl.shape());

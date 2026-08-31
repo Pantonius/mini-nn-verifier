@@ -6,39 +6,17 @@ use ndarray::Zip;
 use crate::{
     interpreters::{
         EvalError, Interpreter,
-        bounds::interval::{
-            ibp_batched::IBPBatchedInterpreter,
-            ibp_util::{IBPBatchedTensor, IBPTensor},
+        bounds::{
+            bab::{BaBConfig, BaBResult},
+            interval::{
+                ibp_batched::IBPBatchedInterpreter,
+                ibp_util::{IBPBatchedTensor, IBPTensor},
+            },
         },
         concrete::eval_util::Tensor,
     },
     mininn::{ComputeGraph, Value},
 };
-
-pub enum BaBResult {
-    Safe,
-    Unsafe(Vec<Tensor>),
-    Undecided,
-}
-
-pub struct BaBConfig {
-    /// how many branches to classify per batched IBP forward pass
-    batch_size: usize,
-    /// minimum width of intervals for further splitting (a formal break-off point)
-    min_width: f64,
-    /// maximum iterations of branch-and-bound (another formal break-off point)
-    max_iters: usize,
-}
-
-impl Default for BaBConfig {
-    fn default() -> Self {
-        Self {
-            batch_size: 64,
-            min_width: 1e-6,
-            max_iters: 1_000_000,
-        }
-    }
-}
 
 struct Branch {
     lb: f64,
@@ -72,7 +50,6 @@ fn branch_width(branch: &Branch) -> f64 {
         a.max(max_width)
     })
 }
-
 // --------------------
 // Split Functions
 // --------------------
@@ -125,7 +102,6 @@ pub fn uniform_split(inputs: &Vec<IBPTensor>) -> Vec<Vec<IBPTensor>> {
         child[split_idx] = IBPTensor::new(right_lb, split_tensor.ub.clone());
         child
     };
-
 
     vec![left_child, right_child]
 }

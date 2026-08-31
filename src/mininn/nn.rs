@@ -1,6 +1,9 @@
 use std::fmt::Display;
 
-use crate::{interpreters::concrete::eval_util::Tensor, mininn::Layer};
+use crate::{
+    interpreters::{EvalError, concrete::eval_util::Tensor},
+    mininn::Layer,
+};
 
 #[derive(Debug, Clone)]
 pub enum AtomKind {
@@ -206,6 +209,48 @@ impl Primitive {
                 grad_out, input, ..
             } => vec![grad_out, input],
             Where(c, x, y) => vec![c, x, y],
+        }
+    }
+}
+
+impl Display for Primitive {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}(", self.name())?;
+        for (i, operand) in self.operands().into_iter().enumerate() {
+            if i > 0 {
+                write!(f, ", ")?;
+            }
+            write!(f, "{operand}")?;
+        }
+        write!(f, ")")
+    }
+}
+
+pub enum Activation {
+    Relu(Atom),
+    LeakyRelu { operand: Atom, slope: f64 },
+    Elu { operand: Atom, slope: f64 },
+    Gelu(Atom),
+}
+
+impl TryFrom<&Primitive> for Activation {
+    type Error = EvalError;
+
+    fn try_from(primitive: &Primitive) -> Result<Self, EvalError> {
+        match primitive {
+            Primitive::Relu(a) => Ok(Activation::Relu(a.clone())),
+            Primitive::LeakyRelu { operand, slope } => Ok(Activation::LeakyRelu {
+                operand: operand.clone(),
+                slope: *slope,
+            }),
+            Primitive::Gelu(a) => Ok(Activation::Gelu(a.clone())),
+            Primitive::Elu { operand, slope } => Ok(Activation::Elu {
+                operand: operand.clone(),
+                slope: *slope,
+            }),
+            _ => Err(EvalError::Eval(format!(
+                "Could not convert {primitive} into Activation"
+            ))),
         }
     }
 }

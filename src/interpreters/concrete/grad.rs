@@ -215,6 +215,11 @@ pub fn vjp_normcdf<T: Value>(x: &T, tangent: &T) -> T {
     tangent.clone() * pdf
 }
 
+pub fn vjp_gelu<T: Value>(x: &T, tangent: &T) -> T {
+    let pdf = vjp_pdf(x);
+    tangent.clone() * x.normcdf() + x.clone() * pdf
+}
+
 fn softmax_xent_vjp(logits: &Tensor, labels: &Tensor) -> Result<Tensor, EvalError> {
     let n = logits.shape()[0] as f64;
     let logits_arr = logits.clone().into_inner();
@@ -270,8 +275,7 @@ impl GradInterpreter {
             }
             Gelu(a) => {
                 let val = p(a)?;
-                let pdf = vjp_pdf(&val);
-                vec![tangent * val.normcdf() + val * pdf]
+                vec![vjp_gelu(&val, &tangent)]
             }
             NormalCdf(a) => {
                 let val = p(a)?;

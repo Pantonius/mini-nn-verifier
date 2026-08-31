@@ -85,6 +85,14 @@ pub fn binary(a: &Tensor, b: &Tensor, f: impl Fn(f64, f64) -> f64) -> Result<Ten
     Ok(Zip::from(&av).and(&bv).map_collect(|&x, &y| f(x, y)).into())
 }
 
+pub fn elu(x: f64, slope: f64) -> f64 {
+    x.max(0.0) + slope * (x.exp() - 1.0).min(0.0)
+}
+
+pub fn gelu(x: f64) -> f64 {
+    x * normcdf(x)
+}
+
 pub fn normcdf(x: f64) -> f64 {
     0.5 * (1.0 + libm::erf(x / std::f64::consts::SQRT_2))
 }
@@ -289,6 +297,10 @@ impl Value for Tensor {
 
     fn len(&self) -> usize {
         self.inner.len()
+    }
+
+    fn as_tensor(&self) -> Option<&Tensor> {
+        Some(self)
     }
 
     /// numpy.where(cond, x, y) with broadcasting; `cond` is truthy when non-zero.
@@ -735,9 +747,7 @@ impl Value for Tensor {
     }
 
     fn elu(&self, slope: f64) -> Self {
-        self.inner
-            .mapv(|x| x.max(0.0) + slope * (x.exp() - 1.0).min(0.0))
-            .into()
+        self.inner.mapv(|x| elu(x, slope)).into()
     }
 
     fn normcdf(&self) -> Self {
@@ -745,7 +755,7 @@ impl Value for Tensor {
     }
 
     fn gelu(&self) -> Self {
-        self.inner.mapv(|x| x * normcdf(x)).into()
+        self.inner.mapv(|x| gelu(x)).into()
     }
 
     fn square(&self) -> Self {

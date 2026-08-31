@@ -19,7 +19,7 @@ mod affine_bounds;
 use affine_bounds::{AffineBoundsArgs, run_affine_bounds};
 
 mod verify2;
-use verify2::{Verify2Args, run_verify2};
+use verify2::run_verify2;
 
 use mininn_verifier::{
     interpreters::{EvalError, concrete::eval_util::Tensor},
@@ -54,8 +54,8 @@ enum Command {
     /// Propagates affine bounds through the entire network (backward)
     #[command(name = "affine_bounds")]
     AffineBounds(AffineBoundsArgs),
-    ///
-    Verify2(Verify2Args),
+    /// Node-Splitting BaB verification
+    Verify2(VerifyArgs),
 }
 
 fn main() -> Result<(), EvalError> {
