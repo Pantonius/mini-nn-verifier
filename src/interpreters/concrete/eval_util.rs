@@ -89,6 +89,10 @@ pub fn normcdf(x: f64) -> f64 {
     0.5 * (1.0 + libm::erf(x / std::f64::consts::SQRT_2))
 }
 
+pub fn normpdf(x: f64) -> f64 {
+    (-(0.5 * x * x)).exp() / (2.0 * std::f64::consts::PI).sqrt()
+}
+
 /// A concrete tensor value in the `eval` interpreter.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Tensor {

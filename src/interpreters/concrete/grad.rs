@@ -56,7 +56,7 @@ fn vjp_dot<T: Value>(tangent: &T, a: &T, b: &T) -> Result<Vec<T>, EvalError> {
     Ok(vec![dx, dy])
 }
 
-fn vjp_conv<T: Value>(
+pub fn vjp_conv<T: Value>(
     tangent: &T,
     input: &T,
     kernel: &T,
@@ -69,52 +69,58 @@ fn vjp_conv<T: Value>(
     }
 
     let s = stride as usize;
-    let kh = kernel.shape()[2];
-    let kw = kernel.shape()[3];
+    let kh = kernel.shape()[2]; // dim of h axis
+    let kw = kernel.shape()[3]; // dim of w axis
 
-    // d_input: dilate tangent, pad borders, convolve with spatially-flipped transposed kernel
+    let rh = (input.shape()[2] - kh) % s; // bits that fall over
+    let rw = (input.shape()[3] - kw) % s; // bits that fall over
+
+    // undo stride
     let dilated = tangent.pad(&PaddingOptions {
         axes: vec![-2, -1],
         config: PaddingOptionConfig {
             left: 0,
-            interior: s - 1,
+            interior: s - 1, // give h and w axis back the original dimension
             right: 0,
         },
         value: 0.0,
     });
+
     let padded = dilated
+        // pad h axis left and right
         .pad(&PaddingOptions {
             axes: vec![-2],
             config: PaddingOptionConfig {
                 left: kh - 1,
                 interior: 0,
-                right: kh - 1,
+                right: kh - 1 + rh,
             },
             value: 0.0,
         })
+        // pad w axis left and right
         .pad(&PaddingOptions {
             axes: vec![-1],
             config: PaddingOptionConfig {
                 left: kw - 1,
                 interior: 0,
-                right: kw - 1,
+                right: kw - 1 + rw,
             },
             value: 0.0,
         });
-    // flip kernel spatial dims and swap OC/IC: [OC,IC,KH,KW] → [IC,OC,KH,KW] flipped
+
+    // flip kernel spatial dims and swap OC/IC: [OC,IC,KH,KW] -> [IC,OC,KH,KW] flipped
     let k_flip = kernel
-        .moveaxis(0, 1)
-        .slice(-2, -1, None, -1)
-        .slice(-1, -1, None, -1);
+        .moveaxis(0, 1) // flip kernel
+        .slice(-2, 0, None, -1) // reverse h
+        .slice(-1, 0, None, -1); // reverse w
     let d_input = padded.conv(&k_flip, 1)?;
 
-    // d_kernel via the ConvKernelGrad primitive
     let d_kernel = tangent.conv_kernel_grad(input, stride, kernel.shape())?;
 
     Ok(vec![d_input, d_kernel])
 }
 
-fn vjp_pad<T: Value>(tangent: &T, a: &T, opt: &PaddingOptions) -> Vec<T> {
+pub fn vjp_pad<T: Value>(tangent: &T, a: &T, opt: &PaddingOptions) -> Vec<T> {
     let mut t = tangent.clone();
     for &ax in &opt.axes {
         let axis = norm_axis_index(ax, a.ndim());
@@ -131,7 +137,7 @@ fn vjp_pad<T: Value>(tangent: &T, a: &T, opt: &PaddingOptions) -> Vec<T> {
     vec![t]
 }
 
-fn vjp_pool<T: Value>(tangent: &T, input: &T, opt: &PoolOptions, average: bool) -> Vec<T> {
+pub fn vjp_pool<T: Value>(tangent: &T, input: &T, opt: &PoolOptions, average: bool) -> Vec<T> {
     let ndim = input.ndim();
     let window_total: usize = opt.window_size.iter().product();
     let scale = T::from(if average {
@@ -196,6 +202,19 @@ pub fn vjp_reshape<T: Value>(operand: &T, tangent: &T) -> Result<Vec<T>, EvalErr
     Ok(vec![tangent.reshape(&orig_shape)?])
 }
 
+pub fn vjp_reciprocal<T: Value>(x: &T, tangent: &T) -> T {
+    -(x.clone().square().reciprocal()) * tangent.clone()
+}
+
+pub fn vjp_pdf<T: Value>(x: &T) -> T {
+    (-(x.square() * T::from(0.5))).exp() * T::from(1.0 / (2.0 * std::f64::consts::PI).sqrt())
+}
+
+pub fn vjp_normcdf<T: Value>(x: &T, tangent: &T) -> T {
+    let pdf = vjp_pdf(x);
+    tangent.clone() * pdf
+}
+
 fn softmax_xent_vjp(logits: &Tensor, labels: &Tensor) -> Result<Tensor, EvalError> {
     let n = logits.shape()[0] as f64;
     let logits_arr = logits.clone().into_inner();
@@ -225,7 +244,7 @@ impl GradInterpreter {
         Ok(match primitive {
             // elementwise unary
             Neg(_) => vec![-tangent],
-            Reciprocal(a) => vec![-(p(a)?.square().reciprocal()) * tangent],
+            Reciprocal(a) => vec![vjp_reciprocal(&p(a)?, &tangent)],
             Square(a) => vec![tangent * T::from(2.0) * p(a)?],
             Sqrt(_) => vec![tangent * (p(outvar)? * T::from(2.0)).reciprocal()],
             Exp(_) => vec![tangent * p(outvar)?],
@@ -251,15 +270,12 @@ impl GradInterpreter {
             }
             Gelu(a) => {
                 let val = p(a)?;
-                let pdf = (-(val.square() * T::from(0.5))).exp()
-                    * T::from(1.0 / (2.0 * std::f64::consts::PI).sqrt());
+                let pdf = vjp_pdf(&val);
                 vec![tangent * val.normcdf() + val * pdf]
             }
             NormalCdf(a) => {
                 let val = p(a)?;
-                let pdf = (-(val.square() * T::from(0.5))).exp()
-                    * T::from(1.0 / (2.0 * std::f64::consts::PI).sqrt());
-                vec![tangent * pdf]
+                vec![vjp_normcdf(&val, &tangent)]
             }
             // linear algebra
             Dot(a, b) => return vjp_dot(&tangent, &p(a)?, &p(b)?),
@@ -281,7 +297,7 @@ impl GradInterpreter {
                 operand,
                 axis,
                 start,
-                end,
+                end: _,
                 step,
             } => {
                 let op = p(operand)?;

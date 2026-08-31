@@ -239,6 +239,13 @@ impl Value for Tracer {
     }
 
     fn r#where(cond: &Self, x: &Self, y: &Self) -> Result<Self, MininnError> {
+        if cond.builder.is_none() && x.builder.is_none() && y.builder.is_none() {
+            if let (AtomKind::Const(c), AtomKind::Const(xt), AtomKind::Const(yt)) =
+                (&cond.atom.kind, &x.atom.kind, &y.atom.kind)
+            {
+                return Tensor::r#where(c, xt, yt).map(Self::from);
+            }
+        }
         let builder = cond
             .builder
             .clone()
@@ -509,6 +516,15 @@ impl Value for Tracer {
         stride: isize,
         kernel_shape: &[usize],
     ) -> Result<Self, MininnError> {
+        if self.builder.is_none() && input.builder.is_none() {
+            if let (AtomKind::Const(gt), AtomKind::Const(it)) =
+                (&self.atom.kind, &input.atom.kind)
+            {
+                return gt
+                    .conv_kernel_grad(it, stride, kernel_shape)
+                    .map(Self::from);
+            }
+        }
         let builder = Self::pick_builder(self.builder.clone(), input.builder.clone());
         let prim = Primitive::ConvKernelGrad {
             grad_out: self.atom.clone(),
@@ -526,6 +542,13 @@ impl Value for Tracer {
     }
 
     fn conv(&self, kernel: &Self, stride: isize) -> Result<Self, MininnError> {
+        if self.builder.is_none() && kernel.builder.is_none() {
+            if let (AtomKind::Const(it), AtomKind::Const(kt)) =
+                (&self.atom.kind, &kernel.atom.kind)
+            {
+                return it.conv(kt, stride).map(Self::from);
+            }
+        }
         // input: [N, C_in, H, W], kernel: [C_out, C_in, kH, kW] → [N, C_out, H_out, W_out]
         let s = stride as usize;
         let out_shape = vec![
